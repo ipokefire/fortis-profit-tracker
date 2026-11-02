@@ -28,7 +28,7 @@ import net.runelite.client.ui.ClientToolbar;
 import net.runelite.client.ui.NavigationButton;
 import net.runelite.client.util.Text;
 
-@PluginDescriptor(internalName="fortis-profit-tracker", name="Fortis Profit Tracker", description="Daily Fortis Colosseum P&L with wave history", tags={"colosseum", "profit", "loot"})
+@PluginDescriptor(internalName="fortis-profit-tracker", name="Colosseum Profit Tracker", description="Daily Fortis Colosseum P&L with wave history", tags={"colosseum", "profit", "loot"})
 public class FortisProfitPlugin extends Plugin
 {
     private static final Logger DIAGNOSTICS = Logger.getLogger(FortisProfitPlugin.class.getName());
@@ -83,7 +83,7 @@ public class FortisProfitPlugin extends Plugin
         graphics.setFont(new Font("SansSerif", Font.BOLD, 12));
         graphics.drawString("F", 4, 12);
         graphics.dispose();
-        navigation = NavigationButton.builder().tooltip("Fortis Profit Tracker")
+        navigation = NavigationButton.builder().tooltip("Colosseum Profit Tracker")
             .icon(image).priority(6).panel(panel).build();
         toolbar.addNavigation(navigation);
         refresh();
@@ -141,6 +141,13 @@ public class FortisProfitPlugin extends Plugin
     boolean classifyAsCashOut(LedgerEvent event)
     {
         boolean changed = ledger.classifyClaimAsCashOut(event);
+        if (changed) refresh();
+        return changed;
+    }
+
+    boolean classifyAsClear(LedgerEvent event)
+    {
+        boolean changed = ledger.classifyAsClear(event);
         if (changed) refresh();
         return changed;
     }
@@ -337,6 +344,12 @@ public class FortisProfitPlugin extends Plugin
             active = true;
             activeWave = Math.max(activeWave, confirmedCompletion);
             completedWave = Math.max(completedWave, confirmedCompletion);
+            // Wave 12 completed is direct proof of defeating Sol Heredit.
+            // Recording this before the chest is claimed avoids a false cash-out.
+            if (confirmedCompletion == 12 && !terminal)
+            {
+                finishClear("Confirmed wave 12 completion (Sol Heredit)");
+            }
             refresh();
             return;
         }
@@ -420,11 +433,22 @@ public class FortisProfitPlugin extends Plugin
         }
         else
         {
-            // A claimed Colosseum chest with no known full clear is an early cash-out.
-            // There is no new unclassified-loot category in this tracker.
-            outcome = LedgerEvent.Type.CASH_OUT;
-            wave = cashOutWave();
-            finishCashOut("Inferred early cash-out from Colosseum loot", wave);
+            // Only a completed wave 12 proves a Sol kill. Merely entering
+            // wave 12 must not be classified as a clear.
+            boolean solCompleted = completedWave >= 12
+                || (lastConfirmedWave == 12 && lastConfirmedWaveMs > 0
+                    && now - lastConfirmedWaveMs >= 0 && now - lastConfirmedWaveMs < 10 * 60_000);
+            wave = solCompleted ? 12 : cashOutWave();
+            if (solCompleted)
+            {
+                outcome = LedgerEvent.Type.CLEAR;
+                finishClear("Confirmed wave 12 before Colosseum loot");
+            }
+            else
+            {
+                outcome = LedgerEvent.Type.CASH_OUT;
+                finishCashOut("Inferred early cash-out from Colosseum loot", wave);
+            }
         }
         DIAGNOSTICS.info("Fortis chest loot: source=" + source + " gp=" + value
             + " wave=" + wave + " confirmed=" + lastConfirmedWave

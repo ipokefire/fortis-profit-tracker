@@ -70,6 +70,7 @@ public class FortisProfitLogicTest
         assertEquals(1, WaveMessages.confirmedColosseumCompletion("Wave 1 completed! Wave duration: 00:39"));
         assertEquals(0, WaveMessages.confirmedColosseumCompletion("Wave 1 completed!"));
         assertEquals(0, WaveMessages.confirmedColosseumCompletion("Wave 13 completed! Wave duration: 01:23"));
+        assertEquals(0, WaveMessages.confirmedColosseumCompletion("Wave 12 is starting"));
     }
 
     @Test public void parsesLiveRuneLiteColoredWaveMessage()

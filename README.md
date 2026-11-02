@@ -1,6 +1,6 @@
-# Fortis Profit Tracker
+# Colosseum Profit Tracker
 
-Fortis Profit Tracker is a third-party RuneLite plugin for Old School RuneScape's Fortis Colosseum. It keeps a local ledger of run outcomes, loot, expenses, and estimated profit or loss.
+Colosseum Profit Tracker is a third-party RuneLite plugin for Old School RuneScape's Fortis Colosseum. It keeps a local ledger of run outcomes, loot, expenses, and estimated profit or loss.
 
 ## Features
 

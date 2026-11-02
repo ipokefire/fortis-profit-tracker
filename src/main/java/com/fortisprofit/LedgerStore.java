@@ -149,6 +149,16 @@ final class LedgerStore
         return true;
     }
 
+    /** Correct a mistakenly inferred wave-12 cash-out without changing its GP. */
+    synchronized boolean classifyAsClear(LedgerEvent event)
+    {
+        if (event.type != LedgerEvent.Type.CASH_OUT || event.wave != 12 || !events.contains(event)) return false;
+        event.type = LedgerEvent.Type.CLEAR;
+        event.note = (event.note == null ? "" : event.note) + " [manually corrected to Sol clear]";
+        save();
+        return true;
+    }
+
     synchronized boolean setWave(LedgerEvent event, int wave)
     {
         if (wave < 0 || wave > 12 || !events.contains(event)) return false;

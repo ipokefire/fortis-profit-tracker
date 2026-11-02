@@ -113,6 +113,7 @@ final class FortisProfitPanel extends PluginPanel
         button(actions, "Cash out", plugin::manualCashOut);
         button(actions, "Add GP entry", this::addEntry);
         button(actions, "Mark cash-out", () -> markCashOut(todayTable, todayVisible));
+        button(actions, "Mark Sol clear", () -> markSolClear(todayTable, todayVisible));
         button(actions, "Set entry wave", () -> setWave(todayTable, todayVisible));
         button(actions, "Set active wave", this::setActiveWave);
         button(actions, "Delete entry", () -> deleteEntry(todayTable, todayVisible));
@@ -160,6 +161,7 @@ final class FortisProfitPanel extends PluginPanel
 
         JPanel actions = new JPanel(new GridLayout(0, 2, 3, 3));
         button(actions, "Mark cash-out", () -> markCashOut(historyDetailTable, historyVisible));
+        button(actions, "Mark Sol clear", () -> markSolClear(historyDetailTable, historyVisible));
         button(actions, "Set entry wave", () -> setWave(historyDetailTable, historyVisible));
         button(actions, "Delete entry", () -> deleteEntry(historyDetailTable, historyVisible));
         button(actions, "Export CSV", this::exportCsv);
@@ -403,6 +405,22 @@ final class FortisProfitPanel extends PluginPanel
             "Classify cash-out",JOptionPane.YES_NO_OPTION)==JOptionPane.YES_OPTION)
         {
             plugin.classifyAsCashOut(selected);
+        }
+    }
+
+    private void markSolClear(JTable table, List<LedgerEvent> entries)
+    {
+        LedgerEvent selected = selectedEntry(table, entries);
+        if (selected == null || selected.type != LedgerEvent.Type.CASH_OUT || selected.wave != 12)
+        {
+            JOptionPane.showMessageDialog(this, "Select a wave-12 early cash-out entry first.");
+            return;
+        }
+        if (JOptionPane.showConfirmDialog(this,
+            "Confirm you defeated Sol Heredit? Reclassify this entry as a full clear without changing GP.",
+            "Correct Sol clear", JOptionPane.YES_NO_OPTION) == JOptionPane.YES_OPTION)
+        {
+            plugin.classifyAsClear(selected);
         }
     }
 
