@@ -1,0 +1,43 @@
+plugins {
+    id 'java'
+}
+
+repositories {
+    mavenLocal()
+    maven { url = 'https://repo.runelite.net' }
+    mavenCentral()
+}
+
+def runeLiteVersion = 'latest.release'
+
+dependencies {
+    compileOnly "net.runelite:client:${runeLiteVersion}"
+    testImplementation "net.runelite:client:${runeLiteVersion}"
+    testImplementation 'junit:junit:4.13.2'
+}
+
+group = 'com.fortisprofit'
+version = '1.2.0'
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_11
+    targetCompatibility = JavaVersion.VERSION_11
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release.set(11)
+}
+
+tasks.register('run', JavaExec) {
+    dependsOn classes, testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.fortisprofit.FortisProfitDevLauncher'
+    jvmArgs '-ea'
+    args '--developer-mode'
+}
+
+tasks.withType(Test).configureEach {
+    // Launcher classes under src/test are not JUnit tests.
+    failOnNoDiscoveredTests = false
+}
