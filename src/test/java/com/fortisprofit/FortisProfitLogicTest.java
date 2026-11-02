@@ -34,6 +34,32 @@ public class FortisProfitLogicTest
         assertEquals(130_000, today.net());
     }
 
+    @Test public void allTimeTotalsIncludeEveryDateButOnlyActiveAccount()
+    {
+        LedgerEvent clear = new LedgerEvent("test-user", LedgerEvent.Type.CLEAR, 0, "", 12);
+        LedgerEvent reward = new LedgerEvent("test-user", LedgerEvent.Type.CLEAR_LOOT, 2_000_000, "", 12);
+        LedgerEvent death = new LedgerEvent("test-user", LedgerEvent.Type.DEATH, -25_000, "", 5);
+        LedgerEvent cashOut = new LedgerEvent("test-user", LedgerEvent.Type.CASH_OUT, 0, "", 3);
+        LedgerEvent cashLoot = new LedgerEvent("test-user", LedgerEvent.Type.CASH_OUT_LOOT, 150_000, "", 3);
+        LedgerEvent other = new LedgerEvent("other-user", LedgerEvent.Type.CLEAR_LOOT, 50_000_000, "", 12);
+        death.timestamp = "2026-10-30T12:00:00Z";
+        clear.timestamp = "2026-11-01T12:00:00Z";
+        reward.timestamp = "2026-11-01T12:00:01Z";
+        cashOut.timestamp = "2026-10-31T12:00:00Z";
+        cashLoot.timestamp = "2026-10-31T12:00:01Z";
+
+        DailySummary all = DailySummary.allTime(
+            Arrays.asList(clear, reward, death, cashOut, cashLoot, other), "test-user");
+        assertEquals(1, all.clears);
+        assertEquals(1, all.cashOuts);
+        assertEquals(1, all.deaths);
+        assertEquals(2_000_000, all.fullClearLoot);
+        assertEquals(150_000, all.cashOutLoot);
+        assertEquals(25_000, all.costs);
+        assertEquals(2_125_000, all.net());
+        assertEquals(0, DailySummary.allTime(Arrays.asList(other), "test-user").net());
+    }
+
     @Test public void recognizesExactCompletedWaveMessageWithoutPriorRunState()
     {
         for (int wave = 1; wave <= 12; wave++)

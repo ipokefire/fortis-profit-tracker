@@ -35,6 +35,16 @@ final class DailySummary
         else costs -= event.gp;
     }
 
+    static DailySummary allTime(List<LedgerEvent> entries, String account)
+    {
+        DailySummary total = new DailySummary();
+        for (LedgerEvent entry : entries)
+        {
+            if (account.equals(entry.account)) total.accept(entry);
+        }
+        return total;
+    }
+
     static Map<LocalDate, DailySummary> byDay(List<LedgerEvent> entries, String account, ZoneId zone)
     {
         Map<LocalDate, DailySummary> daily = new TreeMap<>((a, b) -> b.compareTo(a));

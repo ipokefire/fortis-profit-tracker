@@ -33,7 +33,7 @@ import javax.swing.ScrollPaneConstants;
 import javax.swing.table.DefaultTableModel;
 import net.runelite.client.ui.PluginPanel;
 
-/** Small-screen sidebar: compact live Today summary and drill-down History view. */
+/** Small-screen sidebar: Today, day-by-day History, and cumulative All-Time totals. */
 final class FortisProfitPanel extends PluginPanel
 {
     private static final DateTimeFormatter DATE_LABEL = DateTimeFormatter.ofPattern("MMM d, uuuu");
@@ -45,6 +45,8 @@ final class FortisProfitPanel extends PluginPanel
     private final JLabel todayHeading = new JLabel();
     private final JLabel historyHeading = new JLabel("Select a day above to inspect its ledger");
     private final JLabel historySummary = new JLabel();
+    private final JLabel allTimeSummary = new JLabel();
+    private final JLabel allTimePeriod = new JLabel();
     private final List<LedgerEvent> todayVisible = new ArrayList<>();
     private final List<LedgerEvent> historyVisible = new ArrayList<>();
     private final List<LocalDate> historyDates = new ArrayList<>();
@@ -71,6 +73,7 @@ final class FortisProfitPanel extends PluginPanel
         setLayout(new BorderLayout());
         tabs.addTab("Today", scrollableTab(makeToday()));
         tabs.addTab("History", scrollableTab(makeHistory()));
+        tabs.addTab("All-Time", scrollableTab(makeAllTime()));
         tabs.addChangeListener(e -> refresh());
         add(tabs, BorderLayout.CENTER);
         // Date rollover and login/account changes must update the display even without a ledger event.
@@ -169,6 +172,23 @@ final class FortisProfitPanel extends PluginPanel
         return content;
     }
 
+    private JPanel makeAllTime()
+    {
+        JPanel content = new JPanel(new BorderLayout(0, 8));
+        JPanel summary = new JPanel(new BorderLayout(0, 6));
+        summary.add(new JLabel("All-Time Fortis Colosseum results"), BorderLayout.NORTH);
+        summary.add(allTimeSummary, BorderLayout.CENTER);
+        summary.add(allTimePeriod, BorderLayout.SOUTH);
+        content.add(summary, BorderLayout.NORTH);
+
+        JPanel actions = new JPanel(new GridLayout(0, 2, 3, 3));
+        button(actions, "Refresh", this::refresh);
+        button(actions, "Export CSV", this::exportCsv);
+        content.add(actions, BorderLayout.SOUTH);
+        content.setPreferredSize(new Dimension(230, 270));
+        return content;
+    }
+
     private static DefaultTableModel ledgerModel()
     {
         return new DefaultTableModel(new Object[]{"Time", "Event", "Wave", "GP"},0)
@@ -224,6 +244,19 @@ final class FortisProfitPanel extends PluginPanel
             Map<LocalDate, DailySummary> days=DailySummary.byDay(entries,account,LOCAL_ZONE);
             LocalDate today=LocalDate.now(LOCAL_ZONE);
             DailySummary current=days.getOrDefault(today,new DailySummary());
+            DailySummary lifetime=DailySummary.allTime(entries,account);
+            allTimeSummary.setText(summaryHtml(lifetime));
+            if (days.isEmpty())
+            {
+                allTimePeriod.setText("No recorded attempts yet");
+            }
+            else
+            {
+                LocalDate first=days.keySet().stream().min(LocalDate::compareTo).get();
+                LocalDate last=days.keySet().stream().max(LocalDate::compareTo).get();
+                allTimePeriod.setText("<html>Recorded days: " + days.size()
+                    + "<br>Period: " + first.format(DATE_LABEL) + " - " + last.format(DATE_LABEL) + "</html>");
+            }
             todayHeading.setText("Today  |  " + today.format(DATE_LABEL));
             todaySummary.setText(summaryHtml(current));
 

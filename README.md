@@ -8,7 +8,7 @@ Fortis Profit Tracker is a third-party RuneLite plugin for Old School RuneScape'
 - Detects wave changes from game messages and attributes deaths to waves.
 - Records Colosseum death events and can apply an observed bank-funded gravestone recovery payment to the original death entry.
 - Displays daily GP profit/loss with K/M formatting.
-- Provides Today and History tabs with scrolling.
+- Provides Today, History, and All-Time tabs with scrolling. The All-Time tab aggregates every recorded date for the active in-game account, including total GP, clears, cash-outs, and deaths.
 - Saves history to a local JSON ledger and supports CSV export.
 - Supports manual entries and correction controls.
 
