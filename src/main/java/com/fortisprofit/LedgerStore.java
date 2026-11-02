@@ -161,7 +161,7 @@ final class LedgerStore
 
     synchronized boolean setWave(LedgerEvent event, int wave)
     {
-        if (wave < 0 || wave > 12 || !events.contains(event)) return false;
+        if (wave < -1 || wave > 12 || !events.contains(event)) return false;
         event.wave = wave;
         // Keep the paired cash-out and cash-out loot (or death and fee) in sync
         // only if they are from the same account and within two seconds.

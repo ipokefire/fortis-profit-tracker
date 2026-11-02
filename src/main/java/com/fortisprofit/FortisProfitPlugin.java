@@ -20,6 +20,7 @@ import net.runelite.api.events.ChatMessage;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.game.ItemManager;
+import net.runelite.client.callback.ClientThread;
 import net.runelite.client.game.ItemStack;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
@@ -42,6 +43,7 @@ public class FortisProfitPlugin extends Plugin
     @Inject private Gson gson;
     @Inject private FortisProfitConfig config;
     @Inject private ItemManager itemManager;
+    @Inject private ClientThread clientThread;
 
     private LedgerStore ledger;
     private FortisProfitPanel panel;
@@ -184,6 +186,27 @@ public class FortisProfitPlugin extends Plugin
     private void refresh()
     {
         if (panel != null) SwingUtilities.invokeLater(panel::refresh);
+    }
+
+    /** ItemManager must be accessed on RuneLite's client thread, not Swing's EDT. */
+    void requestQuiverTurnInValue(java.util.function.LongConsumer onValue)
+    {
+        clientThread.invokeLater(() ->
+        {
+            long unitPrice = itemManager.getItemPrice(28924); // Sunfire splinters
+            long value = unitPrice > 0 ? unitPrice * 4_000L : 0L;
+            SwingUtilities.invokeLater(() -> onValue.accept(value));
+        });
+    }
+
+    void recordQuiverTurnIn(long gp, long unitPrice)
+    {
+        if (gp <= 0 || unitPrice <= 0 || gp != unitPrice * 4_000L)
+        {
+            throw new IllegalArgumentException("Invalid quiver exchange valuation");
+        }
+        record(LedgerEvent.Type.QUIVER_TURN_IN, gp,
+            "Dizana's quiver exchanged for 4,000 Sunfire splinters @ " + unitPrice + " GP each", -1);
     }
 
     void manualStart()

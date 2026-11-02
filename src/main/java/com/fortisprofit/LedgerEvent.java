@@ -5,14 +5,14 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 
 final class LedgerEvent {
-    enum Type { CLEAR, DEATH, CASH_OUT, LOOT, CLEAR_LOOT, CASH_OUT_LOOT, DEATH_FEE, SUPPLIES, ADJUSTMENT }
+    enum Type { CLEAR, DEATH, CASH_OUT, LOOT, CLEAR_LOOT, CASH_OUT_LOOT, DEATH_FEE, SUPPLIES, ADJUSTMENT, QUIVER_TURN_IN }
 
     String account;
     String timestamp;
     Type type;
     long gp;
     String note;
-    // 0 means unknown; missing in older v0.2/v0.3 JSON and defaults safely to 0.
+    // -1 means adjustment, 0 means unknown; missing in older v0.2/v0.3 JSON and defaults safely to 0.
     int wave;
 
     LedgerEvent(String account, Type type, long gp, String note) {

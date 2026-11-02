@@ -112,8 +112,7 @@ final class FortisProfitPanel extends PluginPanel
         button(actions, "Record death", plugin::manualDeath);
         button(actions, "Cash out", plugin::manualCashOut);
         button(actions, "Add GP entry", this::addEntry);
-        button(actions, "Mark cash-out", () -> markCashOut(todayTable, todayVisible));
-        button(actions, "Mark Sol clear", () -> markSolClear(todayTable, todayVisible));
+        button(actions, "Quiver turn-in", this::quiverTurnIn);
         button(actions, "Set entry wave", () -> setWave(todayTable, todayVisible));
         button(actions, "Set active wave", this::setActiveWave);
         button(actions, "Delete entry", () -> deleteEntry(todayTable, todayVisible));
@@ -160,8 +159,6 @@ final class FortisProfitPanel extends PluginPanel
         content.add(split, BorderLayout.CENTER);
 
         JPanel actions = new JPanel(new GridLayout(0, 2, 3, 3));
-        button(actions, "Mark cash-out", () -> markCashOut(historyDetailTable, historyVisible));
-        button(actions, "Mark Sol clear", () -> markSolClear(historyDetailTable, historyVisible));
         button(actions, "Set entry wave", () -> setWave(historyDetailTable, historyVisible));
         button(actions, "Delete entry", () -> deleteEntry(historyDetailTable, historyVisible));
         button(actions, "Export CSV", this::exportCsv);
@@ -208,7 +205,7 @@ final class FortisProfitPanel extends PluginPanel
                 if (row>=rows.size()) return null;
                 LedgerEvent entry = rows.get(row);
                 return "<html>" + (entry.note == null ? "" : entry.note.replace("<", "&lt;"))
-                    + " | Wave " + (entry.wave == 0 ? "unknown" : entry.wave)
+                    + " | Wave " + (entry.wave < 0 ? "Adj." : entry.wave == 0 ? "unknown" : entry.wave)
                     + " | " + GpFormat.exactGp(entry.gp) + "</html>";
             }
         };
@@ -318,7 +315,7 @@ final class FortisProfitPanel extends PluginPanel
             String localTime = java.time.Instant.parse(entry.timestamp).atZone(LOCAL_ZONE)
                 .toLocalTime().format(DateTimeFormatter.ofPattern("HH:mm:ss"));
             model.addRow(new Object[]{localTime, friendlyType(entry.type),
-                entry.wave > 0 ? Integer.toString(entry.wave) : "?", GpFormat.shortGp(entry.gp)});
+                entry.wave < 0 ? "Adj." : entry.wave > 0 ? Integer.toString(entry.wave) : "?", GpFormat.shortGp(entry.gp)});
         }
     }
 
@@ -346,6 +343,7 @@ final class FortisProfitPanel extends PluginPanel
             case DEATH_FEE: return "Death fee";
             case SUPPLIES: return "Supplies";
             case ADJUSTMENT: return "Adjustment";
+            case QUIVER_TURN_IN: return "Quiver turn-in";
             default: return type.name();
         }
     }
@@ -357,13 +355,18 @@ final class FortisProfitPanel extends PluginPanel
             LedgerEvent.Type.DEATH_FEE, LedgerEvent.Type.SUPPLIES, LedgerEvent.Type.ADJUSTMENT
         });
         JTextField amount=new JTextField("0");
-        JComboBox<String> wave = waveChooser(0);
+        JComboBox<String> wave = adjustmentWaveChooser(-1);
         JTextField note=new JTextField("Manual entry");
         JPanel form=new JPanel(new GridLayout(0,1));
         form.add(new JLabel("Event type"));form.add(type);
         form.add(new JLabel("GP amount (positive for costs, stored negative)"));form.add(amount);
-        form.add(new JLabel("Wave (unknown if not observed)"));form.add(wave);
+        form.add(new JLabel("Wave (Adj. for supplies / adjustments)"));form.add(wave);
         form.add(new JLabel("Note"));form.add(note);
+        type.addActionListener(e -> {
+            LedgerEvent.Type selected = (LedgerEvent.Type) type.getSelectedItem();
+            if (selected == LedgerEvent.Type.SUPPLIES || selected == LedgerEvent.Type.ADJUSTMENT
+                || selected == LedgerEvent.Type.DEATH_FEE) wave.setSelectedIndex(0);
+        });
         if (JOptionPane.showConfirmDialog(this,form,"Add ledger entry",JOptionPane.OK_CANCEL_OPTION)!=JOptionPane.OK_OPTION) return;
         try
         {
@@ -371,7 +374,7 @@ final class FortisProfitPanel extends PluginPanel
             LedgerEvent.Type selected=(LedgerEvent.Type)type.getSelectedItem();
             if (selected==LedgerEvent.Type.DEATH_FEE || selected==LedgerEvent.Type.SUPPLIES) gp=-Math.abs(gp);
             if (selected==LedgerEvent.Type.DEATH) gp=0;
-            plugin.record(selected,gp,note.getText(),wave.getSelectedIndex());
+            plugin.record(selected,gp,note.getText(),adjustmentWaveValue(wave));
         }
         catch(NumberFormatException ex)
         {
@@ -387,41 +390,44 @@ final class FortisProfitPanel extends PluginPanel
         return modelIndex>=0 && modelIndex<entries.size() ? entries.get(modelIndex) : null;
     }
 
-    private void markCashOut(JTable table,List<LedgerEvent> entries)
+    private void quiverTurnIn()
     {
-        LedgerEvent selected=selectedEntry(table,entries);
-        if (selected==null)
+        plugin.requestQuiverTurnInValue(this::confirmQuiverTurnIn);
+    }
+
+    private void confirmQuiverTurnIn(long value)
+    {
+        if (value <= 0)
         {
-            JOptionPane.showMessageDialog(this,"Select a previously unassigned loot entry first.");
+            JOptionPane.showMessageDialog(this,
+                "Sunfire splinters price is currently unavailable. Try again after RuneLite loads item prices.");
             return;
         }
-        if (selected.type!=LedgerEvent.Type.LOOT)
+        long unitPrice = value / 4_000;
+        String prompt = "Record exchange of one Dizana's quiver for 4,000 Sunfire splinters?\n"
+            + "Price: " + GpFormat.exactGp(unitPrice) + " GP each\n"
+            + "Credit: +" + GpFormat.exactGp(value) + " GP\nWave: Adj.";
+        if (JOptionPane.showConfirmDialog(this, prompt, "Quiver turn-in",
+            JOptionPane.YES_NO_OPTION) == JOptionPane.YES_OPTION)
         {
-            JOptionPane.showMessageDialog(this,"Only a legacy unclassified reward can be marked as an early cash-out.");
-            return;
-        }
-        if (JOptionPane.showConfirmDialog(this,
-            "Convert this old loot row into one cash-out entry on the same date?",
-            "Classify cash-out",JOptionPane.YES_NO_OPTION)==JOptionPane.YES_OPTION)
-        {
-            plugin.classifyAsCashOut(selected);
+            plugin.recordQuiverTurnIn(value, unitPrice);
         }
     }
 
-    private void markSolClear(JTable table, List<LedgerEvent> entries)
+    /** The negative wave sentinel represents a non-wave adjustment in stored ledger data. */
+    private static JComboBox<String> adjustmentWaveChooser(int initial)
     {
-        LedgerEvent selected = selectedEntry(table, entries);
-        if (selected == null || selected.type != LedgerEvent.Type.CASH_OUT || selected.wave != 12)
-        {
-            JOptionPane.showMessageDialog(this, "Select a wave-12 early cash-out entry first.");
-            return;
-        }
-        if (JOptionPane.showConfirmDialog(this,
-            "Confirm you defeated Sol Heredit? Reclassify this entry as a full clear without changing GP.",
-            "Correct Sol clear", JOptionPane.YES_NO_OPTION) == JOptionPane.YES_OPTION)
-        {
-            plugin.classifyAsClear(selected);
-        }
+        JComboBox<String> chooser = new JComboBox<>();
+        chooser.addItem("Adj.");
+        chooser.addItem("Unknown");
+        for (int wave = 1; wave <= 12; wave++) chooser.addItem("Wave " + wave);
+        chooser.setSelectedIndex(initial < 0 ? 0 : Math.min(13, initial + 1));
+        return chooser;
+    }
+
+    private static int adjustmentWaveValue(JComboBox<String> chooser)
+    {
+        return chooser.getSelectedIndex() - 1;
     }
 
     private static JComboBox<String> waveChooser(int initial)
@@ -441,11 +447,11 @@ final class FortisProfitPanel extends PluginPanel
             JOptionPane.showMessageDialog(this, "Select a ledger entry first.");
             return;
         }
-        JComboBox<String> choice = waveChooser(selected.wave);
+        JComboBox<String> choice = adjustmentWaveChooser(selected.wave);
         if (JOptionPane.showConfirmDialog(this, choice, "Wave for selected entry",
             JOptionPane.OK_CANCEL_OPTION) == JOptionPane.OK_OPTION)
         {
-            plugin.changeWave(selected, choice.getSelectedIndex());
+            plugin.changeWave(selected, adjustmentWaveValue(choice));
         }
     }
 

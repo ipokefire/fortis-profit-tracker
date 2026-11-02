@@ -60,6 +60,21 @@ public class FortisProfitLogicTest
         assertEquals(0, DailySummary.allTime(Arrays.asList(other), "test-user").net());
     }
 
+    @Test public void quiverTurnInCreditsProfitWithoutIncreasingClearCount()
+    {
+        LedgerEvent quiver = new LedgerEvent("test-user", LedgerEvent.Type.QUIVER_TURN_IN,
+            4_000L * 379, "4,000 Sunfire splinters", -1);
+        LedgerEvent supplies = new LedgerEvent("test-user", LedgerEvent.Type.SUPPLIES,
+            -40_000, "supplies", -1);
+        DailySummary all = DailySummary.allTime(Arrays.asList(quiver, supplies), "test-user");
+        assertEquals(0, all.clears);
+        assertEquals(0, all.cashOuts);
+        assertEquals(1_516_000, all.totalCredits);
+        assertEquals(40_000, all.costs);
+        assertEquals(1_476_000, all.net());
+        assertEquals(-1, quiver.wave);
+    }
+
     @Test public void recognizesExactCompletedWaveMessageWithoutPriorRunState()
     {
         for (int wave = 1; wave <= 12; wave++)
