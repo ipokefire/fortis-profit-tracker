@@ -36,7 +36,21 @@ final class LedgerStore
             {
                 found = gson.fromJson(reader, EVENTS_TYPE);
             }
-            if (found != null) events.addAll(found);
+            if (found != null)
+            {
+                for (LedgerEvent event : found)
+                {
+                    if (event == null) continue;
+                    // Some v1.3.3 quiver records were serialized without a type.
+                    // Use the existing ADJUSTMENT type for durable compatibility.
+                    if (event.type == null && event.note != null
+                        && event.note.startsWith("Dizana's quiver exchanged for 4,000 Sunfire splinters"))
+                    {
+                        event.type = LedgerEvent.Type.ADJUSTMENT;
+                    }
+                    events.add(event);
+                }
+            }
             // Merge legacy two-row exit+loot pairs in memory, without rewriting on load.
             consolidateLegacyPairs();
         }

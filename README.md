@@ -59,3 +59,10 @@ The JSON ledger is stored locally in RuneLite’s plugin data directory (`.runel
 - **Quiver turn-in** records one Dizana's quiver exchanged for **4,000 Sunfire splinters** as a positive GP credit. The unit GP price is taken from RuneLite's item price cache at confirmation time; historical entry values do not subsequently change.
 - **Adj.** is available as a Wave choice for manual supply and other adjustment entries, and is displayed for quiver turn-ins.
 - Removed the legacy **Mark cash-out** and one-off **Mark Sol clear** correction controls. These changes do not alter previously saved ledger records.
+
+
+### v1.3.4: ledger display compatibility
+
+- Quiver turn-ins use the existing ADJUSTMENT ledger type and display as Quiver turn-in.
+- Prior quiver records with a missing event type are recognized when loading.
+- Unknown event types no longer interrupt Today or History table rendering.

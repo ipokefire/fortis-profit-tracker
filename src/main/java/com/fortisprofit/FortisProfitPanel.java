@@ -314,7 +314,7 @@ final class FortisProfitPanel extends PluginPanel
         {
             String localTime = java.time.Instant.parse(entry.timestamp).atZone(LOCAL_ZONE)
                 .toLocalTime().format(DateTimeFormatter.ofPattern("HH:mm:ss"));
-            model.addRow(new Object[]{localTime, friendlyType(entry.type),
+            model.addRow(new Object[]{localTime, friendlyType(entry),
                 entry.wave < 0 ? "Adj." : entry.wave > 0 ? Integer.toString(entry.wave) : "?", GpFormat.shortGp(entry.gp)});
         }
     }
@@ -330,8 +330,14 @@ final class FortisProfitPanel extends PluginPanel
             + "<br><b>NET: " + GpFormat.shortGp(day.net()) + " GP</b></html>";
     }
 
-    private static String friendlyType(LedgerEvent.Type type)
+    private static String friendlyType(LedgerEvent entry)
     {
+        if (entry.note != null && entry.note.startsWith("Dizana's quiver exchanged for 4,000 Sunfire splinters"))
+        {
+            return "Quiver turn-in";
+        }
+        LedgerEvent.Type type = entry.type;
+        if (type == null) return "Unclassified";
         switch (type)
         {
             case CLEAR: return "Sol clear";

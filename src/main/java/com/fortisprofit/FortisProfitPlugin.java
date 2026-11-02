@@ -205,7 +205,7 @@ public class FortisProfitPlugin extends Plugin
         {
             throw new IllegalArgumentException("Invalid quiver exchange valuation");
         }
-        record(LedgerEvent.Type.QUIVER_TURN_IN, gp,
+        record(LedgerEvent.Type.ADJUSTMENT, gp,
             "Dizana's quiver exchanged for 4,000 Sunfire splinters @ " + unitPrice + " GP each", -1);
     }
 
