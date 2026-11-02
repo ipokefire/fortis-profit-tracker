@@ -53,3 +53,9 @@ BSD 2-Clause License. See [LICENSE](LICENSE).
 ## Local data storage (v1.3.1)
 
 The JSON ledger is stored locally in RuneLite’s plugin data directory (`.runelite/plugin-data/fortis-profit-tracker/ledger.json`). This uses RuneLite’s Filepath API and **does not sync between computers**. Existing pre-v1.3.1 ledgers in `.runelite/fortis-profit-tracker/` are **not migrated**. Use Export CSV to save a separate copy.
+
+### v1.3.3 — manual quiver exchange and adjustments
+
+- **Quiver turn-in** records one Dizana's quiver exchanged for **4,000 Sunfire splinters** as a positive GP credit. The unit GP price is taken from RuneLite's item price cache at confirmation time; historical entry values do not subsequently change.
+- **Adj.** is available as a Wave choice for manual supply and other adjustment entries, and is displayed for quiver turn-ins.
+- Removed the legacy **Mark cash-out** and one-off **Mark Sol clear** correction controls. These changes do not alter previously saved ledger records.
