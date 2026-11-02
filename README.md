@@ -49,3 +49,7 @@ The plugin is not an official RuneLite plugin until accepted through the Plugin 
 ## License
 
 BSD 2-Clause License. See [LICENSE](LICENSE).
+
+## Local data storage (v1.3.1)
+
+The JSON ledger is stored locally in RuneLite’s plugin data directory (`.runelite/plugin-data/fortis-profit-tracker/ledger.json`). This uses RuneLite’s Filepath API and **does not sync between computers**. Existing pre-v1.3.1 ledgers in `.runelite/fortis-profit-tracker/` are **not migrated**. Use Export CSV to save a separate copy.

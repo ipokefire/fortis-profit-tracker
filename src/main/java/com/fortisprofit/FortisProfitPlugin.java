@@ -2,6 +2,7 @@ package com.fortisprofit;
 
 import com.google.gson.Gson;
 import com.google.inject.Provides;
+import java.io.IOException;
 import java.awt.Color;
 import java.awt.Font;
 import java.awt.Graphics2D;
@@ -27,7 +28,7 @@ import net.runelite.client.ui.ClientToolbar;
 import net.runelite.client.ui.NavigationButton;
 import net.runelite.client.util.Text;
 
-@PluginDescriptor(name="Fortis Profit Tracker", description="Daily Fortis Colosseum P&L with wave history", tags={"colosseum", "profit", "loot"})
+@PluginDescriptor(internalName="fortis-profit-tracker", name="Fortis Profit Tracker", description="Daily Fortis Colosseum P&L with wave history", tags={"colosseum", "profit", "loot"})
 public class FortisProfitPlugin extends Plugin
 {
     private static final Logger DIAGNOSTICS = Logger.getLogger(FortisProfitPlugin.class.getName());
@@ -69,9 +70,9 @@ public class FortisProfitPlugin extends Plugin
         return manager.getConfig(FortisProfitConfig.class);
     }
 
-    @Override protected void startUp()
+    @Override protected void startUp() throws IOException
     {
-        ledger = new LedgerStore(gson);
+        ledger = new LedgerStore(gson, getPluginDirectory());
         ledger.load();
         panel = new FortisProfitPanel(this);
         BufferedImage image = new BufferedImage(16, 16, BufferedImage.TYPE_INT_ARGB);

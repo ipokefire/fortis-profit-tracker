@@ -2,25 +2,28 @@ package com.fortisprofit;
 
 import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
-import java.io.File;
+import java.io.Reader;
 import java.io.IOException;
 import java.lang.reflect.Type;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
-import net.runelite.client.RuneLite;
+import net.runelite.client.util.Filepath;
 
 final class LedgerStore
 {
     private static final Type EVENTS_TYPE = new TypeToken<List<LedgerEvent>>() {}.getType();
     private final Gson gson;
-    // Keep the v0.2 path so existing Colosseum history is preserved.
-    private final File file = new File(new File(RuneLite.RUNELITE_DIR, "fortis-profit-tracker"), "ledger.json");
+    private final Filepath directory;
+    private final Filepath file;
     private final List<LedgerEvent> events = new ArrayList<>();
 
-    LedgerStore(Gson gson) { this.gson = gson; }
+    LedgerStore(Gson gson, Filepath directory)
+    {
+        this.gson = gson;
+        this.directory = directory;
+        this.file = directory.joinSegment("ledger.json");
+    }
 
     synchronized void load()
     {
@@ -28,7 +31,11 @@ final class LedgerStore
         if (!file.isFile()) return;
         try
         {
-            List<LedgerEvent> found = gson.fromJson(new String(Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8), EVENTS_TYPE);
+            List<LedgerEvent> found;
+            try (Reader reader = file.openBufferedReader())
+            {
+                found = gson.fromJson(reader, EVENTS_TYPE);
+            }
             if (found != null) events.addAll(found);
             // Merge legacy two-row exit+loot pairs in memory, without rewriting on load.
             consolidateLegacyPairs();
@@ -176,16 +183,16 @@ final class LedgerStore
     {
         try
         {
-            Files.createDirectories(file.toPath().getParent());
-            File temp = new File(file.getParentFile(), "ledger.json.tmp");
-            Files.write(temp.toPath(), gson.toJson(events).getBytes(StandardCharsets.UTF_8));
+            directory.createDirectories();
+            Filepath temp = directory.joinSegment("ledger.json.tmp");
+            temp.write(gson.toJson(events));
             try
             {
-                Files.move(temp.toPath(), file.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+                temp.moveTo(file, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
             }
             catch (java.nio.file.AtomicMoveNotSupportedException ex)
             {
-                Files.move(temp.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING);
+                temp.moveTo(file, StandardCopyOption.REPLACE_EXISTING);
             }
         }
         catch (IOException ex) { throw new IllegalStateException("Could not save Fortis ledger: " + file, ex); }

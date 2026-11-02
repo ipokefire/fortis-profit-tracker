@@ -5,9 +5,6 @@ import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.GridLayout;
 import java.awt.event.MouseEvent;
-import java.io.File;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
@@ -18,7 +15,6 @@ import java.util.Map;
 import java.util.Objects;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
-import javax.swing.JFileChooser;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
@@ -32,6 +28,7 @@ import javax.swing.Timer;
 import javax.swing.ScrollPaneConstants;
 import javax.swing.table.DefaultTableModel;
 import net.runelite.client.ui.PluginPanel;
+import net.runelite.client.util.Filepath;
 
 /** Small-screen sidebar: Today, day-by-day History, and cumulative All-Time totals. */
 final class FortisProfitPanel extends PluginPanel
@@ -455,9 +452,15 @@ final class FortisProfitPanel extends PluginPanel
 
     private void exportCsv()
     {
-        JFileChooser chooser=new JFileChooser();
-        chooser.setSelectedFile(new File("fortis-ledger.csv"));
-        if(chooser.showSaveDialog(this)!=JFileChooser.APPROVE_OPTION) return;
+        List<Filepath> selected = new Filepath.Chooser()
+            .setIsSave()
+            .setAcceptsFiles()
+            .setDialogTitle("Export Fortis Ledger")
+            .setFileName("fortis-ledger.csv")
+            .setDefaultExtension("csv")
+            .addExtensionFilter("CSV files", "csv")
+            .showDialog(this);
+        if (selected == null || selected.isEmpty()) return;
         StringBuilder output=new StringBuilder("account,timestamp,date,type,wave,gp,note\n");
         for (LedgerEvent entry:plugin.entries()) if(plugin.account().equals(entry.account))
         {
@@ -467,7 +470,7 @@ final class FortisProfitPanel extends PluginPanel
         }
         try
         {
-            Files.write(chooser.getSelectedFile().toPath(),output.toString().getBytes(StandardCharsets.UTF_8));
+            selected.get(0).write(output.toString());
         }
         catch(Exception ex)
         {
