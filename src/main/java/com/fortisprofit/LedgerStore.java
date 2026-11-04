@@ -173,6 +173,21 @@ final class LedgerStore
         return true;
     }
 
+    /** Modify a saved entry without changing its original timestamp or account. */
+    synchronized boolean update(LedgerEvent event, LedgerEvent.Type type, long gp, int wave, String note)
+    {
+        if (event == null || type == null || !events.contains(event) || wave < -1 || wave > 12)
+        {
+            return false;
+        }
+        event.type = type;
+        event.gp = gp;
+        event.wave = wave;
+        event.note = note == null ? "" : note;
+        save();
+        return true;
+    }
+
     synchronized boolean setWave(LedgerEvent event, int wave)
     {
         if (wave < -1 || wave > 12 || !events.contains(event)) return false;

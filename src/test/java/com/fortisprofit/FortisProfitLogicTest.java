@@ -75,6 +75,38 @@ public class FortisProfitLogicTest
         assertEquals(-1, quiver.wave);
     }
 
+    @Test public void quiverProceedsReconcileWithClearCashOutAndExpenses()
+    {
+        LedgerEvent clear = new LedgerEvent("test-user", LedgerEvent.Type.CLEAR, 2_240_000, "", 12);
+        LedgerEvent cash = new LedgerEvent("test-user", LedgerEvent.Type.CASH_OUT, 300_000, "", 7);
+        LedgerEvent quiver = new LedgerEvent("test-user", LedgerEvent.Type.QUIVER_TURN_IN,
+            1_336_000, "Dizana's quiver exchanged for 4,000 Sunfire splinters @ 334 GP each", -1);
+        LedgerEvent supplies = new LedgerEvent("test-user", LedgerEvent.Type.SUPPLIES, -150_000, "", -1);
+        DailySummary totals = DailySummary.allTime(Arrays.asList(clear, cash, quiver, supplies), "test-user");
+        assertEquals(1_336_000, totals.quiverTurnIns);
+        assertEquals(3_876_000, totals.totalCredits);
+        assertEquals(3_726_000, totals.net());
+        assertEquals(totals.totalCredits,
+            totals.fullClearLoot + totals.cashOutLoot + totals.quiverTurnIns);
+    }
+
+    @Test public void categorizesCostsWithoutChangingNetProfit()
+    {
+        LedgerEvent clear = new LedgerEvent("user", LedgerEvent.Type.CLEAR, 2_000_000, "", 12);
+        LedgerEvent death = new LedgerEvent("user", LedgerEvent.Type.DEATH, -500_000, "", 9);
+        LedgerEvent fee = new LedgerEvent("user", LedgerEvent.Type.DEATH_FEE, -25_000, "", 9);
+        LedgerEvent supplies = new LedgerEvent("user", LedgerEvent.Type.SUPPLIES, -120_000, "", -1);
+        LedgerEvent adjustment = new LedgerEvent("user", LedgerEvent.Type.ADJUSTMENT, -8_000, "", -1);
+        DailySummary totals = DailySummary.allTime(
+            Arrays.asList(clear, death, fee, supplies, adjustment), "user");
+        assertEquals(525_000, totals.deathCosts);
+        assertEquals(120_000, totals.supplyCosts);
+        assertEquals(8_000, totals.otherCosts());
+        assertEquals(653_000, totals.costs);
+        assertEquals(1_347_000, totals.net());
+        assertEquals(totals.costs, totals.deathCosts + totals.supplyCosts + totals.otherCosts());
+    }
+
     @Test public void recognizesExactCompletedWaveMessageWithoutPriorRunState()
     {
         for (int wave = 1; wave <= 12; wave++)

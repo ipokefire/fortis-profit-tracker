@@ -2,8 +2,13 @@ package com.fortisprofit;
 
 import java.awt.BorderLayout;
 import java.awt.Dimension;
+import java.awt.Component;
+import java.awt.Color;
 import java.awt.FlowLayout;
 import java.awt.GridLayout;
+import java.net.URL;
+import java.io.IOException;
+import javax.imageio.ImageIO;
 import java.awt.event.MouseEvent;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -16,12 +21,19 @@ import java.util.Objects;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
 import javax.swing.JLabel;
+import javax.swing.BoxLayout;
+import javax.swing.BorderFactory;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JSplitPane;
 import javax.swing.JTabbedPane;
 import javax.swing.JTable;
+import javax.swing.ImageIcon;
+import javax.swing.Icon;
+import javax.swing.table.TableCellRenderer;
+import javax.swing.SwingUtilities;
+import net.runelite.client.util.ImageUtil;
 import javax.swing.JTextField;
 import javax.swing.ListSelectionModel;
 import javax.swing.Timer;
@@ -39,11 +51,22 @@ final class FortisProfitPanel extends PluginPanel
     private final FortisProfitPlugin plugin;
     private final JTabbedPane tabs = new JTabbedPane();
     private final JLabel todaySummary = new JLabel();
+    private final JLabel todayClearCount = new JLabel("0");
+    private final JLabel todayCashCount = new JLabel("0");
+    private final JLabel todayDeathCount = new JLabel("0");
+    private final JLabel historyClearCount = new JLabel("0");
+    private final JLabel historyCashCount = new JLabel("0");
+    private final JLabel historyDeathCount = new JLabel("0");
+    private final JLabel todaySolIcon = new JLabel("Sol");
+    private final JLabel historySolIcon = new JLabel("Sol");
     private final JLabel todayHeading = new JLabel();
     private final JLabel historyHeading = new JLabel("Select a day above to inspect its ledger");
     private final JLabel historySummary = new JLabel();
     private final JLabel allTimeSummary = new JLabel();
     private final JLabel allTimePeriod = new JLabel();
+    private final JLabel currentRunHeading = new JLabel("No Colosseum run in progress");
+    private final JLabel currentRunTotal = new JLabel("Supplies: 0 GP");
+    private final JPanel currentSupplyGrid = new JPanel(new GridLayout(0, 4, 4, 6));
     private final List<LedgerEvent> todayVisible = new ArrayList<>();
     private final List<LedgerEvent> historyVisible = new ArrayList<>();
     private final List<LocalDate> historyDates = new ArrayList<>();
@@ -51,7 +74,7 @@ final class FortisProfitPanel extends PluginPanel
     private final DefaultTableModel todayModel = ledgerModel();
     private final DefaultTableModel historyDetailModel = ledgerModel();
     private final DefaultTableModel historyDaysModel = new DefaultTableModel(
-        new Object[]{"Date", "Clear", "Cash", "Dead", "Net"},0)
+        new Object[]{"Date", "Sol", "GP", "Dead", "Net"},0)
     {
         @Override public boolean isCellEditable(int row,int column) { return false; }
     };
@@ -59,6 +82,10 @@ final class FortisProfitPanel extends PluginPanel
     private final JTable todayTable = ledgerTable(todayModel, todayVisible);
     private final JTable historyDetailTable = ledgerTable(historyDetailModel, historyVisible);
     private final JTable historyDaysTable = new JTable(historyDaysModel);
+    // Real Swing icons rather than emoji or Icon objects rendered as text.
+    private Icon solHeaderIcon;
+    private final Icon coinHeaderIcon = loadGrandExchangeIcon();
+    private final Icon skullHeaderIcon = new ImageIcon(skullIcon());
     private final Timer midnightRefresh;
     private boolean refreshing;
     private LocalDate selectedHistoryDate;
@@ -67,10 +94,46 @@ final class FortisProfitPanel extends PluginPanel
     FortisProfitPanel(FortisProfitPlugin plugin)
     {
         this.plugin = plugin;
+        tabs.setTabLayoutPolicy(JTabbedPane.SCROLL_TAB_LAYOUT);
         setLayout(new BorderLayout());
+        // JTableHeader's default renderer stringifies an ImageIcon. Render a JLabel
+        // containing a Swing Icon instead, and use short text if Sol is unavailable.
+        final TableCellRenderer defaultHeader = historyDaysTable.getTableHeader().getDefaultRenderer();
+        historyDaysTable.getTableHeader().setDefaultRenderer((table, value, selected, focus, row, col) -> {
+            Component result = defaultHeader.getTableCellRendererComponent(table, value, selected, focus, row, col);
+            if (result instanceof JLabel)
+            {
+                JLabel label = (JLabel) result;
+                label.setHorizontalAlignment(JLabel.CENTER);
+                label.setIcon(null);
+                Icon icon = col == 1 ? solHeaderIcon : col == 2 ? coinHeaderIcon : col == 3 ? skullHeaderIcon : null;
+                if (icon != null)
+                {
+                    label.setText("");
+                    label.setIcon(icon);
+                }
+                else if (col == 1)
+                {
+                    label.setText("Sol");
+                }
+            }
+            return result;
+        });
+        plugin.loadSolHereditIcon(image -> {
+            if (image == null) return;
+            SwingUtilities.invokeLater(() -> {
+                solHeaderIcon = new ImageIcon(ImageUtil.resizeImage(image, 18, 18));
+                todaySolIcon.setText("");
+                historySolIcon.setText("");
+                todaySolIcon.setIcon(solHeaderIcon);
+                historySolIcon.setIcon(solHeaderIcon);
+                historyDaysTable.getTableHeader().repaint();
+            });
+        });
         tabs.addTab("Today", scrollableTab(makeToday()));
         tabs.addTab("History", scrollableTab(makeHistory()));
         tabs.addTab("All-Time", scrollableTab(makeAllTime()));
+        tabs.addTab("Current Run", scrollableTab(makeCurrentRun()));
         tabs.addChangeListener(e -> refresh());
         add(tabs, BorderLayout.CENTER);
         // Date rollover and login/account changes must update the display even without a ledger event.
@@ -93,13 +156,79 @@ final class FortisProfitPanel extends PluginPanel
     }
 
 
+    /** A bundled pixel-art copy of the GE hand-and-coin icon supplied for the UI. */
+    private static Icon loadGrandExchangeIcon()
+    {
+        URL resource = FortisProfitPanel.class.getResource("/com/fortisprofit/grand_exchange.png");
+        if (resource == null) return null;
+        try
+        {
+            return new ImageIcon(ImageUtil.resizeImage(ImageIO.read(resource), 18, 18));
+        }
+        catch (IOException e)
+        {
+            return null;
+        }
+    }
+
+    /** Keep the three attempt counters in distinct, spaced icon/count pairs. */
+    private static JPanel counterStrip(JLabel solIcon, JLabel clears,
+        JLabel cashOuts, JLabel deaths)
+    {
+        JPanel strip = new JPanel(new FlowLayout(FlowLayout.LEFT, 11, 1));
+        strip.add(counterPair(solIcon, clears, "Sol Heredit clears"));
+        JLabel cashIcon = new JLabel();
+        if (loadGrandExchangeIcon() != null) cashIcon.setIcon(loadGrandExchangeIcon());
+        else cashIcon.setText("GP");
+        strip.add(counterPair(cashIcon, cashOuts, "Early cash-outs"));
+        strip.add(counterPair(new JLabel(new ImageIcon(skullIcon())), deaths, "Deaths"));
+        return strip;
+    }
+
+    private static JPanel counterPair(JLabel icon, JLabel value, String tooltip)
+    {
+        JPanel pair = new JPanel(new FlowLayout(FlowLayout.LEFT, 3, 0));
+        icon.setToolTipText(tooltip);
+        value.setToolTipText(tooltip);
+        pair.add(icon);
+        pair.add(value);
+        return pair;
+    }
+
+    /** A small stable skull image; avoids platform-dependent emoji font rendering. */
+    private static java.awt.image.BufferedImage skullIcon()
+    {
+        java.awt.image.BufferedImage image = new java.awt.image.BufferedImage(18, 18,
+            java.awt.image.BufferedImage.TYPE_INT_ARGB);
+        java.awt.Graphics2D g = image.createGraphics();
+        try
+        {
+            g.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING,
+                java.awt.RenderingHints.VALUE_ANTIALIAS_ON);
+            g.setColor(new Color(220, 220, 210));
+            g.fillOval(3, 1, 12, 12);
+            g.fillRoundRect(6, 10, 6, 6, 2, 2);
+            g.setColor(new Color(40, 40, 40));
+            g.fillOval(5, 6, 3, 3);
+            g.fillOval(10, 6, 3, 3);
+            g.fillOval(8, 10, 2, 2);
+            g.drawLine(8, 13, 8, 15);
+            g.drawLine(10, 13, 10, 15);
+        }
+        finally { g.dispose(); }
+        return image;
+    }
+
     private JPanel makeToday()
     {
         JPanel content = new JPanel(new BorderLayout(0, 6));
         JPanel summary = new JPanel(new BorderLayout(0, 3));
         todayHeading.setText("Today");
         summary.add(todayHeading, BorderLayout.NORTH);
-        summary.add(todaySummary, BorderLayout.CENTER);
+        JPanel figures = new JPanel(new BorderLayout(0, 2));
+        figures.add(counterStrip(todaySolIcon, todayClearCount, todayCashCount, todayDeathCount), BorderLayout.NORTH);
+        figures.add(todaySummary, BorderLayout.CENTER);
+        summary.add(figures, BorderLayout.CENTER);
         content.add(summary, BorderLayout.NORTH);
         JScrollPane todayLedgerScroller = new JScrollPane(todayTable);
         todayLedgerScroller.setPreferredSize(new Dimension(220, 280));
@@ -107,14 +236,9 @@ final class FortisProfitPanel extends PluginPanel
         content.add(todayLedgerScroller, BorderLayout.CENTER);
 
         JPanel actions = new JPanel(new GridLayout(0, 2, 3, 3));
-        button(actions, "Start attempt", plugin::manualStart);
-        button(actions, "Record clear", plugin::manualClear);
-        button(actions, "Record death", plugin::manualDeath);
-        button(actions, "Cash out", plugin::manualCashOut);
-        button(actions, "Add GP entry", this::addEntry);
+        button(actions, "Manual entry", this::addEntry);
         button(actions, "Quiver turn-in", this::quiverTurnIn);
-        button(actions, "Set entry wave", () -> setWave(todayTable, todayVisible));
-        button(actions, "Set active wave", this::setActiveWave);
+        button(actions, "Edit entry", () -> editEntry(todayTable, todayVisible));
         button(actions, "Delete entry", () -> deleteEntry(todayTable, todayVisible));
         button(actions, "Export CSV", this::exportCsv);
         content.add(actions, BorderLayout.SOUTH);
@@ -131,9 +255,10 @@ final class FortisProfitPanel extends PluginPanel
         historyDaysTable.setAutoCreateRowSorter(false);
         historyDaysTable.setRowHeight(23);
         historyDaysTable.getColumnModel().getColumn(0).setPreferredWidth(88);
-        historyDaysTable.getColumnModel().getColumn(1).setPreferredWidth(35);
-        historyDaysTable.getColumnModel().getColumn(2).setPreferredWidth(35);
-        historyDaysTable.getColumnModel().getColumn(3).setPreferredWidth(35);
+        historyDaysTable.getColumnModel().getColumn(1).setPreferredWidth(26);
+        historyDaysTable.getColumnModel().getColumn(2).setPreferredWidth(34);
+        historyDaysTable.getColumnModel().getColumn(3).setPreferredWidth(26);
+        historyDaysTable.getTableHeader().setToolTipText("Sol Heredit = Full clears, GP = Early cash-outs, Skull = Deaths");
         historyDaysTable.getColumnModel().getColumn(4).setPreferredWidth(75);
         historyDaysTable.getSelectionModel().addListSelectionListener(e -> {
             if (e.getValueIsAdjusting() || refreshing) return;
@@ -148,7 +273,10 @@ final class FortisProfitPanel extends PluginPanel
         JPanel bottom = new JPanel(new BorderLayout(0, 3));
         JPanel detailsHeading = new JPanel(new BorderLayout(0, 2));
         detailsHeading.add(historyHeading, BorderLayout.NORTH);
-        detailsHeading.add(historySummary, BorderLayout.CENTER);
+        JPanel figures = new JPanel(new BorderLayout(0, 2));
+        figures.add(counterStrip(historySolIcon, historyClearCount, historyCashCount, historyDeathCount), BorderLayout.NORTH);
+        figures.add(historySummary, BorderLayout.CENTER);
+        detailsHeading.add(figures, BorderLayout.CENTER);
         bottom.add(detailsHeading, BorderLayout.NORTH);
         bottom.add(new JScrollPane(historyDetailTable), BorderLayout.CENTER);
 
@@ -159,7 +287,7 @@ final class FortisProfitPanel extends PluginPanel
         content.add(split, BorderLayout.CENTER);
 
         JPanel actions = new JPanel(new GridLayout(0, 2, 3, 3));
-        button(actions, "Set entry wave", () -> setWave(historyDetailTable, historyVisible));
+        button(actions, "Edit entry", () -> editEntry(historyDetailTable, historyVisible));
         button(actions, "Delete entry", () -> deleteEntry(historyDetailTable, historyVisible));
         button(actions, "Export CSV", this::exportCsv);
         button(actions, "Refresh", this::refresh);
@@ -183,6 +311,53 @@ final class FortisProfitPanel extends PluginPanel
         content.add(actions, BorderLayout.SOUTH);
         content.setPreferredSize(new Dimension(230, 270));
         return content;
+    }
+
+    /** RuneLite item sprites and a compact grid, similar to Supplies Tracker. */
+    private JPanel makeCurrentRun()
+    {
+        JPanel root = new JPanel(new BorderLayout(0, 8));
+        JPanel header = new JPanel(new GridLayout(0, 1, 0, 4));
+        header.add(new JLabel("Current run supplies"));
+        header.add(currentRunHeading);
+        header.add(currentRunTotal);
+        root.add(header, BorderLayout.NORTH);
+        currentSupplyGrid.setBorder(BorderFactory.createEmptyBorder(6, 2, 6, 2));
+        JPanel container = new JPanel(new BorderLayout());
+        container.add(currentSupplyGrid, BorderLayout.NORTH);
+        root.add(container, BorderLayout.CENTER);
+        root.setPreferredSize(new Dimension(230, 490));
+        return root;
+    }
+
+    private void refreshCurrentRun()
+    {
+        boolean tracking = plugin.trackingSupplies();
+        currentRunHeading.setText(tracking ? "Tracking: lobby / arena" : "No Colosseum run in progress");
+        currentRunTotal.setText("Supplies: -" + GpFormat.shortGp(plugin.currentSupplyCost()) + " GP");
+        currentSupplyGrid.removeAll();
+        for (WaveSupplyTracker.ItemUsage item : plugin.currentSupplyItems())
+        {
+            JPanel tile = new JPanel();
+            tile.setLayout(new BoxLayout(tile, BoxLayout.Y_AXIS));
+            tile.setBorder(BorderFactory.createLineBorder(new Color(67, 67, 67)));
+            JLabel icon = new JLabel();
+            icon.setAlignmentX(Component.CENTER_ALIGNMENT);
+            net.runelite.client.util.AsyncBufferedImage sprite = plugin.supplyIcon(item.itemId);
+            if (sprite != null) sprite.addTo(icon);
+            tile.add(icon);
+            JLabel quantity = new JLabel("x" + item.count);
+            quantity.setAlignmentX(Component.CENTER_ALIGNMENT);
+            tile.add(quantity);
+            JLabel cost = new JLabel(GpFormat.shortGp(item.cost));
+            cost.setAlignmentX(Component.CENTER_ALIGNMENT);
+            tile.add(cost);
+            tile.setToolTipText("<html>" + item.name.replace("<", "&lt;")
+                + "<br>" + item.count + " used<br>" + GpFormat.exactGp(item.cost) + " GP</html>");
+            currentSupplyGrid.add(tile);
+        }
+        currentSupplyGrid.revalidate();
+        currentSupplyGrid.repaint();
     }
 
     private static DefaultTableModel ledgerModel()
@@ -232,6 +407,7 @@ final class FortisProfitPanel extends PluginPanel
         refreshing=true;
         try
         {
+            if (tabs.getSelectedIndex() == 3) refreshCurrentRun();
             String account=plugin.account();
             // The active account can change on login; never accidentally carry a selection across accounts.
             if (!Objects.equals(account,accountShown)) selectedHistoryDate=null;
@@ -241,7 +417,7 @@ final class FortisProfitPanel extends PluginPanel
             LocalDate today=LocalDate.now(LOCAL_ZONE);
             DailySummary current=days.getOrDefault(today,new DailySummary());
             DailySummary lifetime=DailySummary.allTime(entries,account);
-            allTimeSummary.setText(summaryHtml(lifetime));
+            allTimeSummary.setText(allTimeBreakdownHtml(lifetime));
             if (days.isEmpty())
             {
                 allTimePeriod.setText("No recorded attempts yet");
@@ -255,6 +431,7 @@ final class FortisProfitPanel extends PluginPanel
             }
             todayHeading.setText("Today  |  " + today.format(DATE_LABEL));
             todaySummary.setText(summaryHtml(current));
+            setCounters(current, todayClearCount, todayCashCount, todayDeathCount);
 
             todayVisible.clear();
             todayModel.setRowCount(0);
@@ -295,11 +472,13 @@ final class FortisProfitPanel extends PluginPanel
         {
             historyHeading.setText("No history recorded yet");
             historySummary.setText("");
+            setCounters(new DailySummary(), historyClearCount, historyCashCount, historyDeathCount);
             return;
         }
         historyHeading.setText(selectedHistoryDate.format(DATE_LABEL));
         DailySummary stats=days.getOrDefault(selectedHistoryDate,new DailySummary());
         historySummary.setText(summaryHtml(stats));
+        setCounters(stats, historyClearCount, historyCashCount, historyDeathCount);
         for (LedgerEvent entry:entries)
         {
             if (plugin.account().equals(entry.account) && selectedHistoryDate.equals(entry.date(LOCAL_ZONE))) historyVisible.add(entry);
@@ -313,21 +492,106 @@ final class FortisProfitPanel extends PluginPanel
         for (LedgerEvent entry:entries)
         {
             String localTime = java.time.Instant.parse(entry.timestamp).atZone(LOCAL_ZONE)
-                .toLocalTime().format(DateTimeFormatter.ofPattern("HH:mm:ss"));
+                .toLocalTime().format(DateTimeFormatter.ofPattern("HH:mm"));
             model.addRow(new Object[]{localTime, friendlyType(entry),
                 entry.wave < 0 ? "Adj." : entry.wave > 0 ? Integer.toString(entry.wave) : "?", GpFormat.shortGp(entry.gp)});
         }
     }
 
+    /** Spacious, reconciled lifetime P&L; shorter daily summaries stay unchanged. */
+    private static String allTimeBreakdownHtml(DailySummary total)
+    {
+        long otherProceeds = total.totalCredits - total.fullClearLoot
+            - total.cashOutLoot - total.quiverTurnIns;
+        long otherCosts = total.otherCosts();
+        String green = "#63c985";
+        String red = "#ef7777";
+        String netColor = total.net() >= 0 ? green : red;
+        StringBuilder out = new StringBuilder("<html><table cellpadding='3' cellspacing='0'>")
+            .append("<tr><td colspan='2'><b>ATTEMPTS</b></td></tr>")
+            .append("<tr><td>Sol clears</td><td align='right'>").append(total.clears).append("</td></tr>")
+            .append("<tr><td>Cash-outs</td><td align='right'>").append(total.cashOuts).append("</td></tr>")
+            .append("<tr><td>Deaths</td><td align='right'>").append(total.deaths).append("</td></tr>")
+            .append("<tr><td colspan='2'>&nbsp;</td></tr>")
+            .append("<tr><td colspan='2'><b>PROCEEDS</b></td></tr>");
+        addPnlRow(out, "Full clears", total.fullClearLoot, green, true);
+        addPnlRow(out, "Early cash-outs", total.cashOutLoot, green, true);
+        addPnlRow(out, "Quiver turn-ins", total.quiverTurnIns, green, true);
+        if (otherProceeds != 0)
+        {
+            addPnlRow(out, "Other proceeds", otherProceeds, otherProceeds >= 0 ? green : red, false);
+        }
+        addPnlRow(out, "Gross proceeds", total.totalCredits, green, true, true);
+        out.append("<tr><td colspan='2'>&nbsp;</td></tr>")
+            .append("<tr><td colspan='2'><b>COSTS</b></td></tr>");
+        addPnlRow(out, "Deaths / recovery", -total.deathCosts, red, false);
+        addPnlRow(out, "Supplies", -total.supplyCosts, red, false);
+        if (otherCosts != 0)
+        {
+            addPnlRow(out, "Other costs", -otherCosts, red, false);
+        }
+        addPnlRow(out, "Total costs", -total.costs, red, false, true);
+        out.append("<tr><td colspan='2'>&nbsp;</td></tr>");
+        addPnlRow(out, "NET PROFIT", total.net(), netColor, false, true);
+        return out.append("</table></html>").toString();
+    }
+
+    private static void addPnlRow(StringBuilder out, String label, long gp, String color,
+        boolean positive)
+    {
+        addPnlRow(out, label, gp, color, positive, false);
+    }
+
+    private static void addPnlRow(StringBuilder out, String label, long gp, String color,
+        boolean positive, boolean bold)
+    {
+        out.append("<tr><td>");
+        if (bold) out.append("<b>");
+        out.append(label);
+        if (bold) out.append("</b>");
+        out.append("</td><td align='right'><font color='").append(color).append("'>");
+        if (bold) out.append("<b>");
+        out.append(gp >= 0 ? "+" : "-")
+            .append(GpFormat.shortGp(Math.abs(gp))).append(" GP");
+        if (bold) out.append("</b>");
+        out.append("</font></td></tr>");
+    }
+
+    private static void setCounters(DailySummary day, JLabel clears, JLabel cashOuts, JLabel deaths)
+    {
+        clears.setText(Integer.toString(day.clears));
+        cashOuts.setText(Integer.toString(day.cashOuts));
+        deaths.setText(Integer.toString(day.deaths));
+    }
+
     private static String summaryHtml(DailySummary day)
     {
-        return "<html><table cellpadding='1' cellspacing='0'>"
-            + "<tr><td>Clears: <b>"+day.clears+"</b></td><td>Cash-outs: <b>"+day.cashOuts+"</b></td><td>Deaths: <b>"+day.deaths+"</b></td></tr>"
-            + "</table>Full clears: " + GpFormat.shortGp(day.fullClearLoot) + " GP"
-            + "<br>Early cash-outs: " + GpFormat.shortGp(day.cashOutLoot) + " GP"
-            + "<br>Total credits: " + GpFormat.shortGp(day.totalCredits) + " GP"
-            + "<br>Costs: " + GpFormat.shortGp(day.costs) + " GP"
-            + "<br><b>NET: " + GpFormat.shortGp(day.net()) + " GP</b></html>";
+        // Gross proceeds are revenue before expenses; never label them gross profit.
+        // Other proceeds preserves the reconciliation if future credit types are added.
+        long otherProceeds = day.totalCredits - day.fullClearLoot - day.cashOutLoot - day.quiverTurnIns;
+        String green = "#63c985";
+        String red = "#ef7777";
+        String netColor = day.net() >= 0 ? green : red;
+        StringBuilder out = new StringBuilder("<html>")
+            .append("Full clears: <font color='").append(green).append("'>+")
+            .append(GpFormat.shortGp(day.fullClearLoot)).append(" GP</font>")
+            .append("<br>Early cash-outs: <font color='").append(green).append("'>+")
+            .append(GpFormat.shortGp(day.cashOutLoot)).append(" GP</font>")
+            .append("<br>Quiver turn-ins: <font color='").append(green).append("'>+")
+            .append(GpFormat.shortGp(day.quiverTurnIns)).append(" GP</font>");
+        if (otherProceeds != 0)
+        {
+            out.append("<br>Other proceeds: <font color='").append(green).append("'>+")
+                .append(GpFormat.shortGp(otherProceeds)).append(" GP</font>");
+        }
+        return out.append("<br>Gross proceeds: <font color='").append(green).append("'>+")
+            .append(GpFormat.shortGp(day.totalCredits)).append(" GP</font>")
+            .append("<br>Costs: <font color='").append(red).append("'>-")
+            .append(GpFormat.shortGp(day.costs)).append(" GP</font>")
+            .append("<br><b>NET: <font color='").append(netColor).append("'>")
+            .append(day.net() >= 0 ? "+" : "-")
+            .append(GpFormat.shortGp(Math.abs(day.net()))).append(" GP</font></b></html>")
+            .toString();
     }
 
     private static String friendlyType(LedgerEvent entry)
@@ -436,39 +700,46 @@ final class FortisProfitPanel extends PluginPanel
         return chooser.getSelectedIndex() - 1;
     }
 
-    private static JComboBox<String> waveChooser(int initial)
-    {
-        JComboBox<String> chooser = new JComboBox<>();
-        chooser.addItem("Unknown");
-        for (int wave = 1; wave <= 12; wave++) chooser.addItem("Wave " + wave);
-        chooser.setSelectedIndex(Math.max(0, Math.min(12, initial)));
-        return chooser;
-    }
-
-    private void setWave(JTable table, List<LedgerEvent> entries)
+    private void editEntry(JTable table, List<LedgerEvent> entries)
     {
         LedgerEvent selected = selectedEntry(table, entries);
         if (selected == null)
         {
-            JOptionPane.showMessageDialog(this, "Select a ledger entry first.");
+            JOptionPane.showMessageDialog(this, "Select an entry to edit first.");
             return;
         }
-        JComboBox<String> choice = adjustmentWaveChooser(selected.wave);
-        if (JOptionPane.showConfirmDialog(this, choice, "Wave for selected entry",
-            JOptionPane.OK_CANCEL_OPTION) == JOptionPane.OK_OPTION)
+        JComboBox<LedgerEvent.Type> type = new JComboBox<>(LedgerEvent.Type.values());
+        type.setSelectedItem(selected.type == null ? LedgerEvent.Type.ADJUSTMENT : selected.type);
+        JTextField amount = new JTextField(Long.toString(selected.gp));
+        JComboBox<String> wave = adjustmentWaveChooser(selected.wave);
+        JTextField note = new JTextField(selected.note == null ? "" : selected.note);
+        JPanel form = new JPanel(new GridLayout(0, 1, 0, 3));
+        form.add(new JLabel("Event type"));
+        form.add(type);
+        form.add(new JLabel("GP amount (negative for costs)"));
+        form.add(amount);
+        form.add(new JLabel("Wave"));
+        form.add(wave);
+        form.add(new JLabel("Note"));
+        form.add(note);
+        if (JOptionPane.showConfirmDialog(this, form, "Edit ledger entry",
+            JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE) != JOptionPane.OK_OPTION) return;
+        try
         {
-            plugin.changeWave(selected, adjustmentWaveValue(choice));
+            long gp = Long.parseLong(amount.getText().replace(",", "").trim());
+            LedgerEvent.Type chosen = (LedgerEvent.Type) type.getSelectedItem();
+            if (chosen == LedgerEvent.Type.SUPPLIES || chosen == LedgerEvent.Type.DEATH_FEE)
+            {
+                gp = -Math.abs(gp);
+            }
+            if (!plugin.editEntry(selected, chosen, gp, adjustmentWaveValue(wave), note.getText()))
+            {
+                JOptionPane.showMessageDialog(this, "Could not update this ledger entry.");
+            }
         }
-    }
-
-    private void setActiveWave()
-    {
-        JComboBox<String> choice = waveChooser(plugin.activeWave());
-        if (JOptionPane.showConfirmDialog(this, choice,
-            "Current Colosseum wave (used for next death / cash-out)",
-            JOptionPane.OK_CANCEL_OPTION) == JOptionPane.OK_OPTION && choice.getSelectedIndex() > 0)
+        catch (NumberFormatException ex)
         {
-            plugin.setActiveWave(choice.getSelectedIndex());
+            JOptionPane.showMessageDialog(this, "Enter a valid whole-number GP amount.");
         }
     }
 

@@ -14,6 +14,23 @@ import java.util.logging.Logger;
 import javax.inject.Inject;
 import javax.swing.SwingUtilities;
 import net.runelite.api.Client;
+import net.runelite.api.GameState;
+import net.runelite.api.NPC;
+import net.runelite.api.events.GameTick;
+import net.runelite.api.events.AnimationChanged;
+import net.runelite.api.ItemID;
+import net.runelite.api.Item;
+import net.runelite.api.Projectile;
+import net.runelite.api.EquipmentInventorySlot;
+import net.runelite.api.coords.WorldPoint;
+import net.runelite.api.coords.LocalPoint;
+import net.runelite.api.gameval.VarPlayerID;
+import net.runelite.api.events.VarbitChanged;
+import net.runelite.api.events.ProjectileMoved;
+import net.runelite.api.InventoryID;
+import net.runelite.api.ItemContainer;
+import net.runelite.api.events.ItemContainerChanged;
+import net.runelite.api.events.MenuOptionClicked;
 import net.runelite.api.ChatMessageType;
 import net.runelite.api.events.ActorDeath;
 import net.runelite.api.events.ChatMessage;
@@ -26,6 +43,9 @@ import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.plugins.loottracker.LootReceived;
 import net.runelite.client.ui.ClientToolbar;
+import net.runelite.client.game.SpriteManager;
+import net.runelite.client.hiscore.HiscoreSkill;
+import java.util.function.Consumer;
 import net.runelite.client.ui.NavigationButton;
 import net.runelite.client.util.Text;
 
@@ -44,8 +64,28 @@ public class FortisProfitPlugin extends Plugin
     @Inject private FortisProfitConfig config;
     @Inject private ItemManager itemManager;
     @Inject private ClientThread clientThread;
+    @Inject private SpriteManager spriteManager;
 
     private LedgerStore ledger;
+    private WaveSupplyTracker supplies;
+    // Minimus (NPC 12807) is in the Colosseum lobby.
+    // Arena tracking is additionally gated by an active Colosseum run.
+    private static final int COLOSSEUM_LOBBY_MINIMUS_ID = 12807;
+    private boolean inColosseumLobby;
+    // Ayak normal cast animation from SuppliesTrackerExternal.
+    // Animation IDs and equipped-weapon verification adapted from
+    // SuppliesTrackerExternal (BSD-2-Clause; THIRD_PARTY_NOTICES.md).
+    private static final int SCYTHE_ATTACK_ANIMATION = 8056;
+    private static final int SHADOW_CAST_ANIMATION = 9493;
+    private static final int AYAK_CAST_ANIMATION = 12397;
+    private static final int AYAK_SPECIAL_ANIMATION = 12394;
+    private static final int BLOWPIPE_ATTACK_ANIMATION = 5061;
+    // SuppliesTrackerExternal Venator Bow attack animation.
+    private static final int VENATOR_BOW_ATTACK_ANIMATION = 9858;
+    private boolean blowpipeWasFrameZero;
+    private Projectile lastBlowpipeProjectile;
+    private boolean ayakNormalWasFrameZero;
+    private long lastLobbySeenMs;
     private FortisProfitPanel panel;
     private NavigationButton navigation;
     private boolean active;
@@ -76,6 +116,9 @@ public class FortisProfitPlugin extends Plugin
     {
         ledger = new LedgerStore(gson, getPluginDirectory());
         ledger.load();
+        supplies = new WaveSupplyTracker(itemManager, (wave, cost, detail) -> {
+            if (cost > 0) record(LedgerEvent.Type.SUPPLIES, -cost, detail, wave);
+        }, this::refresh);
         panel = new FortisProfitPanel(this);
         BufferedImage image = new BufferedImage(16, 16, BufferedImage.TYPE_INT_ARGB);
         Graphics2D graphics = image.createGraphics();
@@ -95,6 +138,14 @@ public class FortisProfitPlugin extends Plugin
     {
         if (navigation != null) toolbar.removeNavigation(navigation);
         if (panel != null) panel.stopUpdates();
+        // Do not write unfinalized supply deductions when shutting down mid-attempt.
+        if (supplies != null) supplies.reset();
+    }
+
+    /** The exact Sol Heredit icon used by RuneLite's HiScores panel. */
+    void loadSolHereditIcon(Consumer<BufferedImage> callback)
+    {
+        spriteManager.getSpriteAsync(HiscoreSkill.SOL_HEREDIT.getSpriteId(), 0, callback);
     }
 
     String account()
@@ -110,6 +161,9 @@ public class FortisProfitPlugin extends Plugin
         if ("Unknown".equals(current)) return;
         if (lastAccount == null || ( !"Unknown".equals(lastAccount) && !lastAccount.equals(current)))
         {
+            if (supplies != null) supplies.reset();
+            inColosseumLobby = false;
+            lastLobbySeenMs = 0;
             active = false;
             terminal = false;
             exitHasLoot = false;
@@ -161,7 +215,24 @@ public class FortisProfitPlugin extends Plugin
         return changed;
     }
 
+    boolean editEntry(LedgerEvent event, LedgerEvent.Type type, long gp, int wave, String note)
+    {
+        boolean changed = ledger.update(event, type, gp, wave, note);
+        if (changed) refresh();
+        return changed;
+    }
+
     int activeWave() { return activeWave; }
+    boolean trackingSupplies() { return supplies != null && supplies.isTracking(); }
+    long currentSupplyCost() { return supplies == null ? 0 : supplies.currentCost(); }
+    java.util.List<WaveSupplyTracker.ItemUsage> currentSupplyItems()
+    {
+        return supplies == null ? java.util.Collections.emptyList() : supplies.currentItems();
+    }
+    net.runelite.client.util.AsyncBufferedImage supplyIcon(int itemId)
+    {
+        return itemManager.getImage(itemId);
+    }
     void setActiveWave(int wave)
     {
         if (wave < 1 || wave > 12) return;
@@ -172,6 +243,12 @@ public class FortisProfitPlugin extends Plugin
             lastExitWave = 0;
             completedWave = 0;
             exitHasLoot = false;
+        }
+        if (config.autoSupplyTracking() && (inColosseumLobby || client.isInInstancedRegion()))
+        {
+            if (!supplies.isTracking()) supplies.begin(wave, client.getItemContainer(InventoryID.INVENTORY),
+                client.getItemContainer(InventoryID.EQUIPMENT));
+            else supplies.changeWave(wave);
         }
         activeWave = wave;
         // This is the current fight, not evidence that the wave is completed.
@@ -209,29 +286,235 @@ public class FortisProfitPlugin extends Plugin
             "Dizana's quiver exchanged for 4,000 Sunfire splinters @ " + unitPrice + " GP each", -1);
     }
 
-    void manualStart()
+    /** Track pre-wave supplies only while Minimus is present in the Colosseum lobby.
+     * Combat supply tracking continues only during a known Colosseum run in the arena.
+     * Leaving the area abandons unfinalized consumption so no outside use is charged.
+     */
+    @Subscribe public void onGameTick(GameTick event)
     {
-        checkAccount();
-        active = true;
-        terminal = false;
-        lastColosseumSignalMs = System.currentTimeMillis();
-        activeWave = 1;
-        completedWave = 0;
-        lastExitWave = 0;
-        lastConfirmedWave = 0;
-        lastConfirmedWaveMs = 0;
-        lastExitType = null;
-        exitHasLoot = false;
-        if (config.suppliesPerAttempt() > 0)
+        if (supplies == null) return;
+        if (!config.autoSupplyTracking() || client.getGameState() != GameState.LOGGED_IN)
         {
-            record(LedgerEvent.Type.SUPPLIES, -config.suppliesPerAttempt(), "Estimated supplies (manual start)", 1);
+            supplies.reset();
+            inColosseumLobby = false;
+            ayakNormalWasFrameZero = false;
+            blowpipeWasFrameZero = false;
+            return;
         }
-        refresh();
+        inColosseumLobby = isColosseumLobby();
+        long now = System.currentTimeMillis();
+        if (inColosseumLobby) lastLobbySeenMs = now;
+        boolean inArenaRun = active && !terminal && client.isInInstancedRegion();
+        // The lobby disappears before the first wave-start message arrives.
+        // Preserve its accrued costs during that brief transition, without
+        // tracking inventory changes until the Colosseum run is confirmed.
+        boolean enteringArena = !active && supplies.isTracking() && client.isInInstancedRegion()
+            && lastLobbySeenMs > 0 && now - lastLobbySeenMs <= 30_000L;
+        if (!inColosseumLobby && !inArenaRun && !enteringArena)
+        {
+            supplies.reset();
+            ayakNormalWasFrameZero = false;
+            blowpipeWasFrameZero = false;
+            return;
+        }
+        if (inColosseumLobby && !active && !supplies.isTracking())
+        {
+            // -1 is the existing "Adj." wave marker; the note says "pre-wave lobby".
+            supplies.begin(-1, client.getItemContainer(InventoryID.INVENTORY),
+                client.getItemContainer(InventoryID.EQUIPMENT));
+            supplies.snapshotQuiver(client.getVarpValue(VarPlayerID.DIZANAS_QUIVER_TEMP_AMMO),
+                client.getVarpValue(VarPlayerID.DIZANAS_QUIVER_TEMP_AMMO_AMOUNT));
+        }
+        // Blowpipe uses internal darts and scales; no inventory stack shrinks.
+        boolean blowpipeShot = inArenaRun && supplies.isTracking() && isBlowpipeEquipped()
+            && client.getLocalPlayer() != null
+            && client.getLocalPlayer().getAnimation() == BLOWPIPE_ATTACK_ANIMATION
+            && client.getLocalPlayer().getAnimationFrame() == 0;
+        if (blowpipeShot && !blowpipeWasFrameZero)
+        {
+            supplies.blowpipeShot(dartLossRate());
+        }
+        blowpipeWasFrameZero = blowpipeShot;
+        // Run-level cost: normal Ayak attacks are sampled once at frame zero.
+        // Do not count the same zero frame twice if it persists across ticks.
+        boolean normal = inArenaRun && supplies.isTracking() && isAyakEquipped()
+            && client.getLocalPlayer() != null
+            && client.getLocalPlayer().getAnimation() == AYAK_CAST_ANIMATION
+            && client.getLocalPlayer().getAnimationFrame() == 0;
+        if (normal && !ayakNormalWasFrameZero) supplies.ayakCast();
+        ayakNormalWasFrameZero = normal;
     }
 
-    void manualClear() { checkAccount(); if (!terminal) finishClear("Manual clear"); }
-    void manualDeath() { checkAccount(); if (!terminal) finishDeath("Manual death"); }
-    void manualCashOut() { checkAccount(); if (!terminal) finishCashOut("Manual early cash-out", cashOutWave()); }
+    @Subscribe public void onAnimationChanged(AnimationChanged event)
+    {
+        if (event.getActor() != client.getLocalPlayer() || !active || terminal
+            || !client.isInInstancedRegion() || supplies == null || !supplies.isTracking()) return;
+        int animation = event.getActor().getAnimation();
+        if (animation == AYAK_SPECIAL_ANIMATION && isAyakEquipped())
+        {
+            supplies.ayakCast();
+        }
+        else if (animation == SCYTHE_ATTACK_ANIMATION && isChargedScytheEquipped())
+        {
+            supplies.scytheAttack();
+        }
+        else if (animation == SHADOW_CAST_ANIMATION && isChargedShadowEquipped())
+        {
+            supplies.shadowCast();
+        }
+        else if (animation == VENATOR_BOW_ATTACK_ANIMATION && isChargedVenatorBowEquipped())
+        {
+            supplies.venatorBowAttack();
+        }
+    }
+
+    private int equippedWeaponId()
+    {
+        ItemContainer equipment = client.getItemContainer(InventoryID.EQUIPMENT);
+        if (equipment == null || equipment.getItems().length <= 3) return -1;
+        net.runelite.api.Item weapon = equipment.getItems()[3];
+        return weapon == null ? -1 : weapon.getId();
+    }
+
+    private boolean isChargedScytheEquipped()
+    {
+        int id = equippedWeaponId();
+        return id == ItemID.SCYTHE_OF_VITUR || id == ItemID.HOLY_SCYTHE_OF_VITUR
+            || id == ItemID.SANGUINE_SCYTHE_OF_VITUR;
+    }
+
+    private boolean isChargedShadowEquipped()
+    {
+        return equippedWeaponId() == ItemID.TUMEKENS_SHADOW;
+    }
+
+    private boolean isChargedVenatorBowEquipped()
+    {
+        // The uncharged bow has a different item ID and must not incur essence costs.
+        return equippedWeaponId() == ItemID.VENATOR_BOW;
+    }
+
+    private boolean isBlowpipeEquipped()
+    {
+        return equippedWeaponId() == ItemID.TOXIC_BLOWPIPE;
+    }
+
+    private double dartLossRate()
+    {
+        ItemContainer equipment = client.getItemContainer(InventoryID.EQUIPMENT);
+        if (equipment == null) return 1.0;
+        Item[] items = equipment.getItems();
+        int capeSlot = EquipmentInventorySlot.CAPE.getSlotIdx();
+        if (items.length <= capeSlot || items[capeSlot] == null || items[capeSlot].getId() <= 0)
+            return 1.0;
+        String name = itemManager.getItemComposition(items[capeSlot].getId())
+            .getName().toLowerCase(Locale.ROOT);
+        if (name.contains("assembler") || name.contains("dizana") || name.contains("quiver")) return 0.20;
+        if (name.contains("accumulator") || name.contains("ranging cape") || name.contains("max cape")) return 0.28;
+        if (name.contains("attractor")) return 0.40;
+        return 1.0;
+    }
+
+    @Subscribe public void onVarbitChanged(VarbitChanged event)
+    {
+        if (!config.autoSupplyTracking() || supplies == null || !supplies.isTracking()
+            || !(inColosseumLobby || (active && !terminal && client.isInInstancedRegion()))) return;
+        int varpId = event.getVarpId();
+        if (varpId != VarPlayerID.DIZANAS_QUIVER_TEMP_AMMO
+            && varpId != VarPlayerID.DIZANAS_QUIVER_TEMP_AMMO_AMOUNT) return;
+        supplies.quiverChanged(client.getVarpValue(VarPlayerID.DIZANAS_QUIVER_TEMP_AMMO),
+            client.getVarpValue(VarPlayerID.DIZANAS_QUIVER_TEMP_AMMO_AMOUNT));
+    }
+
+    @Subscribe public void onProjectileMoved(ProjectileMoved event)
+    {
+        if (!active || terminal || !client.isInInstancedRegion() || supplies == null
+            || !supplies.isTracking() || !isBlowpipeEquipped() || client.getLocalPlayer() == null
+            || client.getLocalPlayer().getAnimation() != BLOWPIPE_ATTACK_ANIMATION) return;
+        Projectile projectile = event.getProjectile();
+        if (projectile == null || projectile == lastBlowpipeProjectile) return;
+        int dart = dartForProjectile(projectile.getId());
+        if (dart <= 0) return;
+        WorldPoint from = WorldPoint.fromLocal(client,
+            new LocalPoint(projectile.getX1(), projectile.getY1()));
+        if (!client.getLocalPlayer().getWorldLocation().equals(from)) return;
+        lastBlowpipeProjectile = projectile;
+        supplies.blowpipeDartObserved(dart);
+    }
+
+    private static int dartForProjectile(int projectileId)
+    {
+        switch (projectileId)
+        {
+            case 226: return ItemID.BRONZE_DART;
+            case 227: return ItemID.IRON_DART;
+            case 228: return ItemID.STEEL_DART;
+            case 32: return ItemID.BLACK_DART;
+            case 229: return ItemID.MITHRIL_DART;
+            case 230: return ItemID.ADAMANT_DART;
+            case 231: return ItemID.RUNE_DART;
+            case 1936: return ItemID.AMETHYST_DART;
+            case 1122: return ItemID.DRAGON_DART;
+            default: return -1;
+        }
+    }
+
+    private boolean isAyakEquipped()
+    {
+        ItemContainer equipment = client.getItemContainer(InventoryID.EQUIPMENT);
+        if (equipment == null || equipment.getItems().length <= 3) return false;
+        net.runelite.api.Item weapon = equipment.getItems()[3];
+        return weapon != null && weapon.getId() == ItemID.EYE_OF_AYAK;
+    }
+
+    private boolean isColosseumLobby()
+    {
+        // Minimus can also appear during an instanced run; that is not the lobby.
+        if (client.isInInstancedRegion()) return false;
+        for (NPC npc : client.getNpcs())
+        {
+            if (npc != null && npc.getId() == COLOSSEUM_LOBBY_MINIMUS_ID)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    @Subscribe public void onMenuOptionClicked(MenuOptionClicked event)
+    {
+        if (config.autoSupplyTracking() && supplies != null && supplies.isTracking()
+            && (inColosseumLobby || (active && !terminal && client.isInInstancedRegion())))
+        {
+            supplies.onMenuOption(event.getMenuOption(), event.getItemId());
+        }
+    }
+
+    @Subscribe public void onItemContainerChanged(ItemContainerChanged event)
+    {
+        if (!config.autoSupplyTracking() || supplies == null || !supplies.isTracking()
+            || !(inColosseumLobby || (active && !terminal && client.isInInstancedRegion()))) return;
+        ItemContainer container = event.getItemContainer();
+        if (container == null) return;
+        if (container.getId() == InventoryID.INVENTORY.getId()) supplies.inventoryChanged(container);
+        else if (container.getId() == InventoryID.EQUIPMENT.getId()) supplies.equipmentChanged(container);
+    }
+
+    private void startSuppliesIfNecessary(int wave)
+    {
+        if (!config.autoSupplyTracking() || supplies == null
+            || !(inColosseumLobby || client.isInInstancedRegion())) return;
+        if (!supplies.isTracking()) supplies.begin(wave, client.getItemContainer(InventoryID.INVENTORY),
+            client.getItemContainer(InventoryID.EQUIPMENT));
+        else supplies.changeWave(wave);
+        supplies.snapshotQuiver(client.getVarpValue(VarPlayerID.DIZANAS_QUIVER_TEMP_AMMO),
+            client.getVarpValue(VarPlayerID.DIZANAS_QUIVER_TEMP_AMMO_AMOUNT));
+    }
+
+    private void completeSupplies()
+    {
+        if (supplies != null) supplies.finish();
+    }
 
     private int cashOutWave()
     {
@@ -245,6 +528,7 @@ public class FortisProfitPlugin extends Plugin
     private void finishCashOut(String source, int wave)
     {
         record(LedgerEvent.Type.CASH_OUT, 0, source, wave);
+        completeSupplies();
         lastExitType = LedgerEvent.Type.CASH_OUT;
         lastExitMs = System.currentTimeMillis();
         lastExitWave = wave;
@@ -256,6 +540,7 @@ public class FortisProfitPlugin extends Plugin
     private void finishClear(String source)
     {
         record(LedgerEvent.Type.CLEAR, 0, source, 12);
+        completeSupplies();
         terminal = true;
         active = false;
         completedWave = 12;
@@ -270,6 +555,7 @@ public class FortisProfitPlugin extends Plugin
     {
         int wave = activeWave;
         record(LedgerEvent.Type.DEATH, 0, source, wave);
+        completeSupplies();
         // Recovery fee stays zero until a real payment is observed.
         // A detected gravestone payment updates THIS death row, not a second fee row.
         terminal = true;
@@ -355,10 +641,13 @@ public class FortisProfitPlugin extends Plugin
                 terminal = false;
                 activeWave = 0;
                 completedWave = 0;
+                // Keep pre-wave lobby expenses for this attempt. A prior run's
+                // expenses were already finalized by its finish method.
                 lastExitType = null;
                 lastExitWave = 0;
                 exitHasLoot = false;
             }
+            startSuppliesIfNecessary(confirmedCompletion);
             lastConfirmedWave = confirmedCompletion;
             lastConfirmedWaveMs = System.currentTimeMillis();
             lastColosseumSignalMs = lastConfirmedWaveMs;
@@ -385,6 +674,7 @@ public class FortisProfitPlugin extends Plugin
             {
                 active = true;
                 terminal = false;
+                // Do not discard expenses accumulated in the lobby before wave 1.
                 completedWave = 0;
                 lastExitType = null;
                 exitHasLoot = false;
@@ -394,6 +684,7 @@ public class FortisProfitPlugin extends Plugin
                 // Reaching wave N shows the preceding wave was survived.
                 completedWave = Math.max(completedWave, wave - 1);
             }
+            startSuppliesIfNecessary(wave);
             activeWave = wave;
             lastColosseumSignalMs = System.currentTimeMillis();
             active = true;
