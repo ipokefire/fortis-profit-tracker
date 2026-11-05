@@ -1,10 +1,8 @@
 package com.fortisprofit;
 
 import com.google.gson.Gson;
-import com.google.gson.reflect.TypeToken;
 import java.io.Reader;
 import java.io.IOException;
-import java.lang.reflect.Type;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
@@ -12,7 +10,6 @@ import net.runelite.client.util.Filepath;
 
 final class LedgerStore
 {
-    private static final Type EVENTS_TYPE = new TypeToken<List<LedgerEvent>>() {}.getType();
     private final Gson gson;
     private final Filepath directory;
     private final Filepath file;
@@ -31,10 +28,10 @@ final class LedgerStore
         if (!file.isFile()) return;
         try
         {
-            List<LedgerEvent> found;
+            LedgerEvent[] found;
             try (Reader reader = file.openBufferedReader())
             {
-                found = gson.fromJson(reader, EVENTS_TYPE);
+                found = gson.fromJson(reader, LedgerEvent[].class);
             }
             if (found != null)
             {

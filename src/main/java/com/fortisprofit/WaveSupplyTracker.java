@@ -18,8 +18,8 @@ import net.runelite.client.game.ItemManager;
  *
  * Inspired by the inventory comparison approach in SuppliesTrackerExternal,
  * Copyright (c) 2019 Dozer, BSD-2-Clause (see THIRD_PARTY_NOTICES.md).
- * Uses deliberately conservative detection. Charged weapons, rune pouch, and
- * blowpipe shots are estimated from observed attack animation and projectile.
+ * Uses deliberately conservative detection. Rune pouch changes are tracked
+ * via varbits; charged weapons and blowpipe shots use attack/projectile estimates.
  * Direct ammunition losses and Dizana's quiver stack changes are recorded.
  * Inventory swaps are never assumed to be consumed ammunition.
  * All ItemManager calls must run on the RuneLite client thread.
@@ -56,6 +56,9 @@ final class WaveSupplyTracker
 
     private final Map<Integer, ItemUsage> usage = new HashMap<>();
     private long currentCost;
+    private final int[] pouchTypes = new int[4];
+    private final int[] pouchQuantities = new int[4];
+    private boolean pouchInitialized;
     private Map<Integer, Integer> inventory = new HashMap<>();
     private int ammoId = -1;
     private int ammoQuantity;
@@ -118,6 +121,9 @@ final class WaveSupplyTracker
         pendingConsumedId = -1;
         usage.clear();
         currentCost = 0;
+        pouchInitialized = false;
+        java.util.Arrays.fill(pouchTypes, 0);
+        java.util.Arrays.fill(pouchQuantities, 0);
         if (changed) onChange.run();
     }
 
@@ -175,14 +181,14 @@ final class WaveSupplyTracker
                     // is valued at exactly 1/4 of the same full potion.
                     String canonical = PotionGrouping.fullName(name);
                     int canonicalId = PotionGrouping.fullDoseId(canonical);
-                    if (canonicalId <= 0) canonicalId = id;
-                    long fullPrice = price(canonicalId);
-                    // If the canonical item cannot be resolved, avoid a
-                    // misleading 1-dose valuation: use the current item's
-                    // available price divided by its number of doses.
+                    boolean knownFullDose = canonicalId > 0;
+                    long fullPrice = knownFullDose ? price(canonicalId) : 0;
+                    // Known potions are valued at a quarter of the 4-dose price.
+                    // For an unknown variant, use the observed dose variant's
+                    // price divided by its remaining doses as a fallback.
                     long each = Math.round((double) (fullPrice > 0 ? fullPrice : price(id))
                         / (fullPrice > 0 ? 4 : dose));
-                    accrue(canonicalId, canonical, Math.min(lost, 1), each);
+                    accrue(knownFullDose ? canonicalId : id, canonical, Math.min(lost, 1), each);
                 }
                 else
                 {
@@ -216,6 +222,62 @@ final class WaveSupplyTracker
         }
         ammoId = id;
         ammoQuantity = quantity;
+    }
+
+    /** Rune pouch quantities and types come from RuneLite varbits, unlike inventory runes.
+     * Snapshot first; subsequent decrements are valued as consumed runes.
+     * Inspired by SuppliesTrackerExternal's RunePouch/Runes mapping.
+     */
+    void runePouchChanged(int[] types, int[] quantities)
+    {
+        if (!tracking || types == null || quantities == null || types.length != 4 || quantities.length != 4) return;
+        for (int i = 0; i < 4; i++)
+        {
+            int type = types[i];
+            int amount = Math.max(0, quantities[i]);
+            if (pouchInitialized)
+            {
+                int consumed = RunePouchDiff.consumed(pouchTypes[i], pouchQuantities[i], type, amount);
+                int runeId = runePouchItemId(pouchTypes[i]);
+                if (consumed > 0 && runeId > 0)
+                    accrue(runeId, itemName(runeId), consumed, price(runeId));
+            }
+            pouchTypes[i] = type;
+            pouchQuantities[i] = amount;
+        }
+        pouchInitialized = true;
+    }
+
+    /** Rune-pouch type codes from SuppliesTrackerExternal's Runes enum. */
+    static int runePouchItemId(int type)
+    {
+        switch (type)
+        {
+            case 1: return net.runelite.api.gameval.ItemID.AIRRUNE;
+            case 2: return net.runelite.api.gameval.ItemID.WATERRUNE;
+            case 3: return net.runelite.api.gameval.ItemID.EARTHRUNE;
+            case 4: return net.runelite.api.gameval.ItemID.FIRERUNE;
+            case 5: return net.runelite.api.gameval.ItemID.MINDRUNE;
+            case 6: return net.runelite.api.gameval.ItemID.CHAOSRUNE;
+            case 7: return net.runelite.api.gameval.ItemID.DEATHRUNE;
+            case 8: return net.runelite.api.gameval.ItemID.BLOODRUNE;
+            case 9: return net.runelite.api.gameval.ItemID.COSMICRUNE;
+            case 10: return net.runelite.api.gameval.ItemID.NATURERUNE;
+            case 11: return net.runelite.api.gameval.ItemID.LAWRUNE;
+            case 12: return net.runelite.api.gameval.ItemID.BODYRUNE;
+            case 13: return net.runelite.api.gameval.ItemID.SOULRUNE;
+            case 14: return net.runelite.api.gameval.ItemID.ASTRALRUNE;
+            case 15: return net.runelite.api.gameval.ItemID.MISTRUNE;
+            case 16: return net.runelite.api.gameval.ItemID.MUDRUNE;
+            case 17: return net.runelite.api.gameval.ItemID.DUSTRUNE;
+            case 18: return net.runelite.api.gameval.ItemID.LAVARUNE;
+            case 19: return net.runelite.api.gameval.ItemID.STEAMRUNE;
+            case 20: return net.runelite.api.gameval.ItemID.SMOKERUNE;
+            case 21: return net.runelite.api.gameval.ItemID.WRATHRUNE;
+            case 22: return net.runelite.api.gameval.ItemID.SUNFIRERUNE;
+            case 23: return net.runelite.api.gameval.ItemID.AETHERRUNE;
+            default: return -1;
+        }
     }
 
     /** Track ammunition stored inside Dizana's quiver via RuneLite's quiver varps.

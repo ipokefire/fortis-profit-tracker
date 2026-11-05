@@ -147,3 +147,15 @@ Runes or charges already priced via direct stack changes are not tracked again f
 - Arrows are still accounted for separately from actual equipment/quiver stack decreases. An uncharged Venator Bow is not charged Ancient Essence.
 - As with other animation-based charged-weapon tracking, missed client events may undercount usage. Confirm the observed charge total during a Colosseum run before publishing.
 - Supplies are still consolidated into one `Supplies / Adj.` entry per attempt.
+
+## v1.4.14 — Spell rune supplies
+
+Inventory rune decreases are tracked as before. Rune pouch runes are now also
+tracked using the four RuneLite rune-pouch type/quantity varbits, inspired by
+SuppliesTrackerExternal. Both appear in Current Run and contribute to the one
+consolidated Supplies / Adj. expense at the end of each Colosseum attempt.
+Runes are only counted while lobby/arena tracking is active. Slot refills, swaps,
+and large quantity moves are not counted as spell costs. Rune-saving effects and
+very rapid multi-step changes may still produce differences from exact spend.
+Shadow's internal charges remain priced separately; these are not stored rune
+stacks and should not be counted twice.

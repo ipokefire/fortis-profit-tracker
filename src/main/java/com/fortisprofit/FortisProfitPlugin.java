@@ -25,6 +25,7 @@ import net.runelite.api.EquipmentInventorySlot;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.gameval.VarPlayerID;
+import net.runelite.api.gameval.VarbitID;
 import net.runelite.api.events.VarbitChanged;
 import net.runelite.api.events.ProjectileMoved;
 import net.runelite.api.InventoryID;
@@ -325,6 +326,7 @@ public class FortisProfitPlugin extends Plugin
             supplies.snapshotQuiver(client.getVarpValue(VarPlayerID.DIZANAS_QUIVER_TEMP_AMMO),
                 client.getVarpValue(VarPlayerID.DIZANAS_QUIVER_TEMP_AMMO_AMOUNT));
         }
+        updateRunePouchSupplies();
         // Blowpipe uses internal darts and scales; no inventory stack shrinks.
         boolean blowpipeShot = inArenaRun && supplies.isTracking() && isBlowpipeEquipped()
             && client.getLocalPlayer() != null
@@ -509,6 +511,27 @@ public class FortisProfitPlugin extends Plugin
         else supplies.changeWave(wave);
         supplies.snapshotQuiver(client.getVarpValue(VarPlayerID.DIZANAS_QUIVER_TEMP_AMMO),
             client.getVarpValue(VarPlayerID.DIZANAS_QUIVER_TEMP_AMMO_AMOUNT));
+    }
+
+    /** Sync four rune pouch slots once per game tick while Colosseum tracking is active.
+     * ItemManager valuation happens here on the RuneLite client thread.
+     */
+    private void updateRunePouchSupplies()
+    {
+        if (supplies == null || !supplies.isTracking()) return;
+        int[] types = {
+            client.getVarbitValue(VarbitID.RUNE_POUCH_TYPE_1),
+            client.getVarbitValue(VarbitID.RUNE_POUCH_TYPE_2),
+            client.getVarbitValue(VarbitID.RUNE_POUCH_TYPE_3),
+            client.getVarbitValue(VarbitID.RUNE_POUCH_TYPE_4)
+        };
+        int[] quantities = {
+            client.getVarbitValue(VarbitID.RUNE_POUCH_QUANTITY_1),
+            client.getVarbitValue(VarbitID.RUNE_POUCH_QUANTITY_2),
+            client.getVarbitValue(VarbitID.RUNE_POUCH_QUANTITY_3),
+            client.getVarbitValue(VarbitID.RUNE_POUCH_QUANTITY_4)
+        };
+        supplies.runePouchChanged(types, quantities);
     }
 
     private void completeSupplies()
