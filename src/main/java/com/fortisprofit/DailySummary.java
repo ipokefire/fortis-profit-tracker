@@ -63,6 +63,32 @@ final class DailySummary
             || (event.note != null && event.note.startsWith("Dizana's quiver exchanged for 4,000 Sunfire splinters"));
     }
 
+    /** Compute daily and lifetime totals together, scanning each ledger entry once. */
+    static Totals aggregate(List<LedgerEvent> entries, String account, ZoneId zone)
+    {
+        Map<LocalDate, DailySummary> daily = new TreeMap<>((a, b) -> b.compareTo(a));
+        DailySummary lifetime = new DailySummary();
+        for (LedgerEvent entry : entries)
+        {
+            if (!account.equals(entry.account)) continue;
+            lifetime.accept(entry);
+            daily.computeIfAbsent(entry.date(zone), ignored -> new DailySummary()).accept(entry);
+        }
+        return new Totals(lifetime, daily);
+    }
+
+    static final class Totals
+    {
+        final DailySummary lifetime;
+        final Map<LocalDate, DailySummary> daily;
+
+        Totals(DailySummary lifetime, Map<LocalDate, DailySummary> daily)
+        {
+            this.lifetime = lifetime;
+            this.daily = daily;
+        }
+    }
+
     static DailySummary allTime(List<LedgerEvent> entries, String account)
     {
         DailySummary total = new DailySummary();
@@ -75,12 +101,6 @@ final class DailySummary
 
     static Map<LocalDate, DailySummary> byDay(List<LedgerEvent> entries, String account, ZoneId zone)
     {
-        Map<LocalDate, DailySummary> daily = new TreeMap<>((a, b) -> b.compareTo(a));
-        for (LedgerEvent entry : entries)
-        {
-            if (!account.equals(entry.account)) continue;
-            daily.computeIfAbsent(entry.date(zone), ignored -> new DailySummary()).accept(entry);
-        }
-        return daily;
+        return aggregate(entries, account, zone).daily;
     }
 }

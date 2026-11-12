@@ -1,4 +1,22 @@
+## v1.5.1 — Experimental UI refresh optimizations
+
+- Live supply changes now refresh the Current Run view only, instead of rebuilding the ledger, daily History and All-Time tables.
+- Coalesces bursts of queued Swing refresh requests so repeated changes need not schedule a separate complete repaint.
+- Reuses the most recently rendered ledger and day summaries when choosing a History date, instead of reading and recalculating the ledger twice.
+- Reuses one timestamp formatter for event table rows.
+- Does not change the JSON ledger schema, price calculations, tracking detection, or existing event classifications.
+
+**Experimental build:** Run `clean build` locally and check live supply updates, attempts finalizing, editing/deleting entries, account switching and History selection before considering publication.
+
 # Colosseum Profit Tracker
+
+## v1.5.0 — Conservative code cleanup (development build)
+
+- Removed unused manual-start wave setter and legacy cash-out/clear classification APIs. The unified **Edit entry** dialog remains available.
+- Preserved legacy ledger parsing and event types for previously recorded history.
+- Calculated Today, History, and All-Time summaries together in one traversal during UI refresh.
+- No change to GP valuations, automatic detection, supplies, JSON schema, or Plugin Hub identifier.
+- Development-only change: validate in IntelliJ before publishing.
 
 ## v1.4.15 — RuneLite Plugin Hub compliance
 
@@ -162,3 +180,11 @@ Runes or charges already priced via direct stack changes are not tracked again f
 - Arrows are still accounted for separately from actual equipment/quiver stack decreases. An uncharged Venator Bow is not charged Ancient Essence.
 - As with other animation-based charged-weapon tracking, missed client events may undercount usage. Confirm the observed charge total during a Colosseum run before publishing.
 - Supplies are still consolidated into one `Supplies / Adj.` entry per attempt.
+
+
+### v1.5.2 experimental — Reload Ledger
+
+The History and All-Time **Refresh** buttons are now **Reload Ledger**.
+Choose Reload Ledger after replacing `ledger.json` on disk to load its records without restarting RuneLite.
+The plugin validates the file before replacing the in-memory ledger, shows errors without losing the existing ledger, and refuses reload during an active tracked attempt.
+Reload **replaces** the in-memory history; it does not merge two histories. The sidebar continues to refresh automatically during normal gameplay.

@@ -9,6 +9,29 @@ import static org.junit.Assert.*;
 
 public class FortisProfitLogicTest
 {
+    @Test public void combinedAggregationMatchesSeparateHistoryAndLifetimeTotals()
+    {
+        LedgerEvent clear = new LedgerEvent("user", LedgerEvent.Type.CLEAR, 2_000_000, "", 12);
+        LedgerEvent supplies = new LedgerEvent("user", LedgerEvent.Type.SUPPLIES, -80_000, "", -1);
+        LedgerEvent cash = new LedgerEvent("user", LedgerEvent.Type.CASH_OUT, 150_000, "", 4);
+        LedgerEvent other = new LedgerEvent("other", LedgerEvent.Type.DEATH, -500_000, "", 7);
+        clear.timestamp = "2026-11-01T12:00:00Z";
+        supplies.timestamp = "2026-11-01T12:05:00Z";
+        cash.timestamp = "2026-11-02T12:00:00Z";
+        other.timestamp = "2026-11-02T12:01:00Z";
+        java.util.List<LedgerEvent> entries = Arrays.asList(clear, supplies, cash, other);
+        ZoneId zone = ZoneId.of("UTC");
+        DailySummary.Totals totals = DailySummary.aggregate(entries, "user", zone);
+        DailySummary original = DailySummary.allTime(entries, "user");
+        assertEquals(original.net(), totals.lifetime.net());
+        assertEquals(original.totalCredits, totals.lifetime.totalCredits);
+        assertEquals(original.supplyCosts, totals.lifetime.supplyCosts);
+        assertEquals(2, totals.daily.size());
+        assertEquals(1_920_000, totals.daily.get(LocalDate.of(2026, 11, 1)).net());
+        assertEquals(150_000, totals.daily.get(LocalDate.of(2026, 11, 2)).net());
+        assertEquals(2_070_000, totals.lifetime.net());
+    }
+
     @Test public void abbreviatesGpWithoutChangingLedgerAmount()
     {
         assertEquals("999", GpFormat.shortGp(999));

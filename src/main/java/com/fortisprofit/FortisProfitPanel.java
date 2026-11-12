@@ -46,6 +46,7 @@ import net.runelite.client.util.Filepath;
 final class FortisProfitPanel extends PluginPanel
 {
     private static final DateTimeFormatter DATE_LABEL = DateTimeFormatter.ofPattern("MMM d, uuuu");
+    private static final DateTimeFormatter TIME_LABEL = DateTimeFormatter.ofPattern("HH:mm");
     private static final ZoneId LOCAL_ZONE = ZoneId.systemDefault();
 
     private final FortisProfitPlugin plugin;
@@ -70,6 +71,10 @@ final class FortisProfitPanel extends PluginPanel
     private final List<LedgerEvent> todayVisible = new ArrayList<>();
     private final List<LedgerEvent> historyVisible = new ArrayList<>();
     private final List<LocalDate> historyDates = new ArrayList<>();
+    // Latest rendered snapshot. Selecting a History day should not reload and
+    // reaggregate the entire ledger a second time.
+    private List<LedgerEvent> renderedEntries = java.util.Collections.emptyList();
+    private Map<LocalDate, DailySummary> renderedDays = java.util.Collections.emptyMap();
 
     private final DefaultTableModel todayModel = ledgerModel();
     private final DefaultTableModel historyDetailModel = ledgerModel();
@@ -290,7 +295,7 @@ final class FortisProfitPanel extends PluginPanel
         button(actions, "Edit entry", () -> editEntry(historyDetailTable, historyVisible));
         button(actions, "Delete entry", () -> deleteEntry(historyDetailTable, historyVisible));
         button(actions, "Export CSV", this::exportCsv);
-        button(actions, "Refresh", this::refresh);
+        button(actions, "Reload Ledger", this::reloadLedger);
         content.add(actions, BorderLayout.SOUTH);
         content.setPreferredSize(new Dimension(230, 620));
         return content;
@@ -306,7 +311,7 @@ final class FortisProfitPanel extends PluginPanel
         content.add(summary, BorderLayout.NORTH);
 
         JPanel actions = new JPanel(new GridLayout(0, 2, 3, 3));
-        button(actions, "Refresh", this::refresh);
+        button(actions, "Reload Ledger", this::reloadLedger);
         button(actions, "Export CSV", this::exportCsv);
         content.add(actions, BorderLayout.SOUTH);
         content.setPreferredSize(new Dimension(230, 270));
@@ -401,6 +406,35 @@ final class FortisProfitPanel extends PluginPanel
         area.add(button);
     }
 
+    /** Called for live supply updates without rebuilding ledger/history tables. */
+    /** Reload a manually replaced ledger.json; normal UI updates remain automatic. */
+    private void reloadLedger()
+    {
+        int choice = JOptionPane.showConfirmDialog(this,
+            "Reload ledger.json from disk?\n"
+                + "This replaces the current in-memory history (it does not merge entries).\n"
+                + "Make sure RuneLite is not writing the file on another client.",
+            "Reload Ledger", JOptionPane.OK_CANCEL_OPTION, JOptionPane.WARNING_MESSAGE);
+        if (choice != JOptionPane.OK_OPTION) return;
+        try
+        {
+            int count = plugin.reloadLedgerFromDisk();
+            refresh();
+            JOptionPane.showMessageDialog(this, "Reloaded " + count + " ledger entries from disk.",
+                "Reload Complete", JOptionPane.INFORMATION_MESSAGE);
+        }
+        catch (Exception ex)
+        {
+            JOptionPane.showMessageDialog(this, ex.getMessage(), "Ledger Not Reloaded",
+                JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+    void refreshSuppliesOnly()
+    {
+        if (tabs.getSelectedIndex() == 3) refreshCurrentRun();
+    }
+
     void refresh()
     {
         if (refreshing) return;
@@ -413,10 +447,13 @@ final class FortisProfitPanel extends PluginPanel
             if (!Objects.equals(account,accountShown)) selectedHistoryDate=null;
             accountShown=account;
             List<LedgerEvent> entries=plugin.entries();
-            Map<LocalDate, DailySummary> days=DailySummary.byDay(entries,account,LOCAL_ZONE);
+            DailySummary.Totals totals = DailySummary.aggregate(entries, account, LOCAL_ZONE);
+            Map<LocalDate, DailySummary> days = totals.daily;
+            renderedEntries = entries;
+            renderedDays = days;
             LocalDate today=LocalDate.now(LOCAL_ZONE);
             DailySummary current=days.getOrDefault(today,new DailySummary());
-            DailySummary lifetime=DailySummary.allTime(entries,account);
+            DailySummary lifetime=totals.lifetime;
             allTimeSummary.setText(allTimeBreakdownHtml(lifetime));
             if (days.isEmpty())
             {
@@ -461,7 +498,7 @@ final class FortisProfitPanel extends PluginPanel
 
     private void showHistoryDetails()
     {
-        showHistoryDetails(plugin.entries(), DailySummary.byDay(plugin.entries(),plugin.account(),LOCAL_ZONE));
+        showHistoryDetails(renderedEntries, renderedDays);
     }
 
     private void showHistoryDetails(List<LedgerEvent> entries, Map<LocalDate,DailySummary> days)
@@ -492,7 +529,7 @@ final class FortisProfitPanel extends PluginPanel
         for (LedgerEvent entry:entries)
         {
             String localTime = java.time.Instant.parse(entry.timestamp).atZone(LOCAL_ZONE)
-                .toLocalTime().format(DateTimeFormatter.ofPattern("HH:mm"));
+                .toLocalTime().format(TIME_LABEL);
             model.addRow(new Object[]{localTime, friendlyType(entry),
                 entry.wave < 0 ? "Adj." : entry.wave > 0 ? Integer.toString(entry.wave) : "?", GpFormat.shortGp(entry.gp)});
         }

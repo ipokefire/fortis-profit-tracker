@@ -87,6 +87,13 @@ public class FortisProfitPlugin extends Plugin
     private Projectile lastBlowpipeProjectile;
     private boolean ayakNormalWasFrameZero;
     private long lastLobbySeenMs;
+    // Coalesce bursts of supply updates into a single UI event. Ledger changes
+    // still request a full refresh so all historical totals stay current.
+    private final java.util.concurrent.atomic.AtomicBoolean refreshQueued =
+        new java.util.concurrent.atomic.AtomicBoolean();
+    private final java.util.concurrent.atomic.AtomicBoolean suppliesRefreshQueued =
+        new java.util.concurrent.atomic.AtomicBoolean();
+
     private FortisProfitPanel panel;
     private NavigationButton navigation;
     private boolean active;
@@ -119,7 +126,7 @@ public class FortisProfitPlugin extends Plugin
         ledger.load();
         supplies = new WaveSupplyTracker(itemManager, (wave, cost, detail) -> {
             if (cost > 0) record(LedgerEvent.Type.SUPPLIES, -cost, detail, wave);
-        }, this::refresh);
+        }, this::refreshSuppliesOnly);
         panel = new FortisProfitPanel(this);
         BufferedImage image = new BufferedImage(16, 16, BufferedImage.TYPE_INT_ARGB);
         Graphics2D graphics = image.createGraphics();
@@ -184,36 +191,10 @@ public class FortisProfitPlugin extends Plugin
         refresh();
     }
 
-    void record(LedgerEvent.Type type, long gp, String note)
-    {
-        record(type, gp, note, 0);
-    }
-
     void delete(LedgerEvent event)
     {
         ledger.delete(event);
         refresh();
-    }
-
-    boolean classifyAsCashOut(LedgerEvent event)
-    {
-        boolean changed = ledger.classifyClaimAsCashOut(event);
-        if (changed) refresh();
-        return changed;
-    }
-
-    boolean classifyAsClear(LedgerEvent event)
-    {
-        boolean changed = ledger.classifyAsClear(event);
-        if (changed) refresh();
-        return changed;
-    }
-
-    boolean changeWave(LedgerEvent event, int wave)
-    {
-        boolean changed = ledger.setWave(event, wave);
-        if (changed) refresh();
-        return changed;
     }
 
     boolean editEntry(LedgerEvent event, LedgerEvent.Type type, long gp, int wave, String note)
@@ -223,7 +204,6 @@ public class FortisProfitPlugin extends Plugin
         return changed;
     }
 
-    int activeWave() { return activeWave; }
     boolean trackingSupplies() { return supplies != null && supplies.isTracking(); }
     long currentSupplyCost() { return supplies == null ? 0 : supplies.currentCost(); }
     java.util.List<WaveSupplyTracker.ItemUsage> currentSupplyItems()
@@ -234,36 +214,39 @@ public class FortisProfitPlugin extends Plugin
     {
         return itemManager.getImage(itemId);
     }
-    void setActiveWave(int wave)
+    java.util.List<LedgerEvent> entries() { return ledger.list(); }
+
+    /** Explicit disk reload; never discard a live run's unsaved supplies. */
+    int reloadLedgerFromDisk()
     {
-        if (wave < 1 || wave > 12) return;
-        checkAccount();
-        if (terminal)
+        if (active || trackingSupplies())
         {
-            lastExitType = null;
-            lastExitWave = 0;
-            completedWave = 0;
-            exitHasLoot = false;
+            throw new IllegalStateException("Finish or leave the current Colosseum attempt before reloading the ledger.");
         }
-        if (config.autoSupplyTracking() && (inColosseumLobby || client.isInInstancedRegion()))
-        {
-            if (!supplies.isTracking()) supplies.begin(wave, client.getItemContainer(InventoryID.INVENTORY),
-                client.getItemContainer(InventoryID.EQUIPMENT));
-            else supplies.changeWave(wave);
-        }
-        activeWave = wave;
-        // This is the current fight, not evidence that the wave is completed.
-        if (wave > 1) completedWave = Math.max(completedWave, wave - 1);
-        active = true;
-        terminal = false;
-        refresh();
+        // A successful parse replaces all in-memory entries atomically.
+        return ledger.reload();
     }
 
-    java.util.List<LedgerEvent> entries() { return ledger.list(); }
 
     private void refresh()
     {
-        if (panel != null) SwingUtilities.invokeLater(panel::refresh);
+        if (panel == null || !refreshQueued.compareAndSet(false, true)) return;
+        SwingUtilities.invokeLater(() ->
+        {
+            refreshQueued.set(false);
+            if (panel != null) panel.refresh();
+        });
+    }
+
+    /** Supply updates do not change the persisted ledger or history tables. */
+    private void refreshSuppliesOnly()
+    {
+        if (panel == null || !suppliesRefreshQueued.compareAndSet(false, true)) return;
+        SwingUtilities.invokeLater(() ->
+        {
+            suppliesRefreshQueued.set(false);
+            if (panel != null) panel.refreshSuppliesOnly();
+        });
     }
 
     /** ItemManager must be accessed on RuneLite's client thread, not Swing's EDT. */

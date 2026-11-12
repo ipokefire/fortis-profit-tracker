@@ -22,46 +22,73 @@ final class LedgerStore
         this.file = directory.joinSegment("ledger.json");
     }
 
-    synchronized void load()
+    /** Reload without changing the current in-memory ledger unless parsing succeeds. */
+    synchronized int load()
     {
-        events.clear();
-        if (!file.isFile()) return;
-        try
+        // A brand-new installation may not have a ledger file yet.
+        if (!file.isFile()) return events.size();
+        return reload();
+    }
+
+    synchronized int reload()
+    {
+        if (!file.isFile())
         {
-            LedgerEvent[] found;
-            try (Reader reader = file.openBufferedReader())
-            {
-                found = gson.fromJson(reader, LedgerEvent[].class);
-            }
-            if (found != null)
-            {
-                for (LedgerEvent event : found)
-                {
-                    if (event == null) continue;
-                    // Some v1.3.3 quiver records were serialized without a type.
-                    // Use the existing ADJUSTMENT type for durable compatibility.
-                    if (event.type == null && event.note != null
-                        && event.note.startsWith("Dizana's quiver exchanged for 4,000 Sunfire splinters"))
-                    {
-                        event.type = LedgerEvent.Type.ADJUSTMENT;
-                    }
-                    events.add(event);
-                }
-            }
-            // Merge legacy two-row exit+loot pairs in memory, without rewriting on load.
-            consolidateLegacyPairs();
+            throw new IllegalStateException("Ledger file not found: " + file);
+        }
+        try (Reader reader = file.openBufferedReader())
+        {
+            List<LedgerEvent> loaded = parseEntries(gson, reader);
+            events.clear();
+            events.addAll(loaded);
+            return events.size();
         }
         catch (Exception ex)
         {
-            throw new IllegalStateException("Could not read Fortis ledger " + file + ". File left unchanged.", ex);
+            throw new IllegalStateException("Could not read ledger " + file + ". Existing history retained.", ex);
         }
     }
 
+    /** Parse in isolation so errors never erase the current ledger. */
+    static List<LedgerEvent> parseEntries(Gson gson, Reader reader)
+    {
+        LedgerEvent[] found = gson.fromJson(reader, LedgerEvent[].class);
+        if (found == null)
+        {
+            throw new IllegalArgumentException("Expected a JSON array of ledger entries, not null");
+        }
+        List<LedgerEvent> loaded = new ArrayList<>();
+        for (LedgerEvent event : found)
+        {
+            if (event == null)
+            {
+                throw new IllegalArgumentException("Ledger contains a null entry");
+            }
+            // Some v1.3.3 quiver records were serialized without a type.
+            if (event.type == null && event.note != null
+                && event.note.startsWith("Dizana's quiver exchanged for 4,000 Sunfire splinters"))
+            {
+                event.type = LedgerEvent.Type.ADJUSTMENT;
+            }
+            if (event.type == null || event.account == null || event.account.trim().isEmpty()
+                || event.timestamp == null || event.wave < -1 || event.wave > 12)
+            {
+                throw new IllegalArgumentException("Ledger entry has missing or invalid fields");
+            }
+            try { java.time.Instant.parse(event.timestamp); }
+            catch (Exception ex) { throw new IllegalArgumentException("Invalid ledger timestamp", ex); }
+            loaded.add(event);
+        }
+        // Preserve older exit/loot records without rewriting their file on reload.
+        consolidateLegacyPairs(loaded);
+        return loaded;
+    }
+
     /** Consolidate v0.4 cash-out/clear event and corresponding loot into one outcome row. */
-    private void consolidateLegacyPairs()
+    private static void consolidateLegacyPairs(List<LedgerEvent> entries)
     {
         List<LedgerEvent> remove = new ArrayList<>();
-        for (LedgerEvent loot : events)
+        for (LedgerEvent loot : entries)
         {
             LedgerEvent.Type outcomeType = loot.type == LedgerEvent.Type.CASH_OUT_LOOT
                 ? LedgerEvent.Type.CASH_OUT : loot.type == LedgerEvent.Type.CLEAR_LOOT
@@ -69,7 +96,7 @@ final class LedgerStore
             if (outcomeType == null) continue;
             LedgerEvent match = null;
             long bestDelta = Long.MAX_VALUE;
-            for (LedgerEvent outcome : events)
+            for (LedgerEvent outcome : entries)
             {
                 if (outcome.type != outcomeType || !java.util.Objects.equals(outcome.account, loot.account)
                     || outcome.gp != 0 || remove.contains(outcome)) continue;
@@ -89,9 +116,9 @@ final class LedgerStore
                 remove.add(loot);
             }
         }
-        events.removeAll(remove);
+        entries.removeAll(remove);
         // Standalone old loot classified as a successful exit is a complete outcome itself.
-        for (LedgerEvent e : events)
+        for (LedgerEvent e : entries)
         {
             if (e.type == LedgerEvent.Type.CASH_OUT_LOOT) e.type = LedgerEvent.Type.CASH_OUT;
             if (e.type == LedgerEvent.Type.CLEAR_LOOT) e.type = LedgerEvent.Type.CLEAR;
@@ -150,26 +177,6 @@ final class LedgerStore
     synchronized void add(LedgerEvent event) { events.add(event); save(); }
     synchronized void delete(LedgerEvent event) { if (events.remove(event)) save(); }
 
-    /** Convert one old unassigned loot row into a single cash-out outcome. */
-    synchronized boolean classifyClaimAsCashOut(LedgerEvent event)
-    {
-        if (event.type != LedgerEvent.Type.LOOT || !events.contains(event)) return false;
-        event.type = LedgerEvent.Type.CASH_OUT;
-        event.note = "Early cash-out; manually classified from earlier loot";
-        save();
-        return true;
-    }
-
-    /** Correct a mistakenly inferred wave-12 cash-out without changing its GP. */
-    synchronized boolean classifyAsClear(LedgerEvent event)
-    {
-        if (event.type != LedgerEvent.Type.CASH_OUT || event.wave != 12 || !events.contains(event)) return false;
-        event.type = LedgerEvent.Type.CLEAR;
-        event.note = (event.note == null ? "" : event.note) + " [manually corrected to Sol clear]";
-        save();
-        return true;
-    }
-
     /** Modify a saved entry without changing its original timestamp or account. */
     synchronized boolean update(LedgerEvent event, LedgerEvent.Type type, long gp, int wave, String note)
     {
@@ -181,36 +188,6 @@ final class LedgerStore
         event.gp = gp;
         event.wave = wave;
         event.note = note == null ? "" : note;
-        save();
-        return true;
-    }
-
-    synchronized boolean setWave(LedgerEvent event, int wave)
-    {
-        if (wave < -1 || wave > 12 || !events.contains(event)) return false;
-        event.wave = wave;
-        // Keep the paired cash-out and cash-out loot (or death and fee) in sync
-        // only if they are from the same account and within two seconds.
-        if (event.type == LedgerEvent.Type.CASH_OUT || event.type == LedgerEvent.Type.CASH_OUT_LOOT
-            || event.type == LedgerEvent.Type.DEATH || event.type == LedgerEvent.Type.DEATH_FEE
-            || event.type == LedgerEvent.Type.CLEAR || event.type == LedgerEvent.Type.CLEAR_LOOT)
-        {
-            LedgerEvent.Type related = event.type == LedgerEvent.Type.CASH_OUT ? LedgerEvent.Type.CASH_OUT_LOOT
-                : event.type == LedgerEvent.Type.CASH_OUT_LOOT ? LedgerEvent.Type.CASH_OUT
-                : event.type == LedgerEvent.Type.DEATH ? LedgerEvent.Type.DEATH_FEE
-                : event.type == LedgerEvent.Type.DEATH_FEE ? LedgerEvent.Type.DEATH
-                : event.type == LedgerEvent.Type.CLEAR ? LedgerEvent.Type.CLEAR_LOOT
-                : LedgerEvent.Type.CLEAR;
-            long when = java.time.Instant.parse(event.timestamp).toEpochMilli();
-            for (LedgerEvent candidate : events)
-            {
-                if (candidate != event && candidate.type == related && candidate.account.equals(event.account)
-                    && Math.abs(java.time.Instant.parse(candidate.timestamp).toEpochMilli() - when) <= 2_000)
-                {
-                    candidate.wave = wave;
-                }
-            }
-        }
         save();
         return true;
     }
