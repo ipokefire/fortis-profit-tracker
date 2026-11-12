@@ -1,22 +1,29 @@
-## v1.5.1 — Experimental UI refresh optimizations
-
-- Live supply changes now refresh the Current Run view only, instead of rebuilding the ledger, daily History and All-Time tables.
-- Coalesces bursts of queued Swing refresh requests so repeated changes need not schedule a separate complete repaint.
-- Reuses the most recently rendered ledger and day summaries when choosing a History date, instead of reading and recalculating the ledger twice.
-- Reuses one timestamp formatter for event table rows.
-- Does not change the JSON ledger schema, price calculations, tracking detection, or existing event classifications.
-
-**Experimental build:** Run `clean build` locally and check live supply updates, attempts finalizing, editing/deleting entries, account switching and History selection before considering publication.
-
 # Colosseum Profit Tracker
 
-## v1.5.0 — Conservative code cleanup (development build)
+## v1.5.2.1 — Reload Ledger and compile fix
 
-- Removed unused manual-start wave setter and legacy cash-out/clear classification APIs. The unified **Edit entry** dialog remains available.
+- Replaced the redundant **Refresh** buttons in History and All-Time with **Reload Ledger**.
+- Reload Ledger reads the current `ledger.json` from disk without restarting RuneLite, making it easier to load a replacement ledger copied from another computer.
+- Validates the replacement JSON before replacing the in-memory ledger; an invalid file does not clear the currently loaded history.
+- Blocks reloads during an active Colosseum attempt or supply-tracking session to avoid disrupting in-progress data.
+- Confirms the number of entries loaded after a successful reload.
+- Preserves the established ledger schema and compatibility handling for older quiver-turn-in records. Reloading **replaces** the in-memory history; it does not merge two histories.
+- Fixed four incorrect references in the ledger's legacy-entry consolidation helper that prevented v1.5.2 from compiling.
+
+## v1.5.1 — UI refresh optimizations
+
+- Live supply changes refresh the Current Run view only, rather than rebuilding the ledger, daily History, and All-Time tables.
+- Coalesces bursts of queued Swing refresh requests to avoid unnecessary complete repaints.
+- Reuses previously rendered ledger and day summaries when choosing a History date, avoiding redundant reads and calculations.
+- Reuses one timestamp formatter for event table rows.
+- Keeps JSON ledger schema, GP price calculations, tracking detection, and existing event classifications unchanged.
+
+## v1.5.0 — Code cleanup and aggregation improvements
+
+- Removed unused manual-start wave setter and legacy cash-out/clear classification APIs; the unified **Edit entry** dialog remains available.
 - Preserved legacy ledger parsing and event types for previously recorded history.
-- Calculated Today, History, and All-Time summaries together in one traversal during UI refresh.
-- No change to GP valuations, automatic detection, supplies, JSON schema, or Plugin Hub identifier.
-- Development-only change: validate in IntelliJ before publishing.
+- Combined Today, History, and All-Time summary aggregation into one traversal during UI refresh.
+- Kept GP valuations, automatic detection, supplies, JSON schema, and Plugin Hub identifier unchanged.
 
 ## v1.4.15 — RuneLite Plugin Hub compliance
 
@@ -39,8 +46,6 @@
 - Added Edit entry in Today and History to modify an existing record's type, GP, wave, and note without changing its account or timestamp.
 - Retained Quiver turn-in, Delete entry, and CSV export.
 
-# Colosseum Profit Tracker
-
 Colosseum Profit Tracker is a third-party RuneLite plugin for Old School RuneScape's Fortis Colosseum. It keeps a local ledger of run outcomes, loot, expenses, and estimated profit or loss.
 
 ## Features
@@ -50,8 +55,8 @@ Colosseum Profit Tracker is a third-party RuneLite plugin for Old School RuneSca
 - Records Colosseum death events and can apply an observed bank-funded gravestone recovery payment to the original death entry.
 - Displays daily GP profit/loss with K/M formatting.
 - Provides Today, History, and All-Time tabs with scrolling. The All-Time tab aggregates every recorded date for the active in-game account, including total GP, clears, cash-outs, and deaths.
-- Saves history to a local JSON ledger and supports CSV export.
-- Supports manual entries and correction controls.
+- Saves history to a local JSON ledger, supports CSV export, and can reload a replaced `ledger.json` from disk using **Reload Ledger** (History or All-Time).
+- Supports manual entries, editing existing entries, and deleting entries.
 
 ## Important limitations
 
@@ -63,7 +68,7 @@ Colosseum Profit Tracker is a third-party RuneLite plugin for Old School RuneSca
 
 The plugin stores ledger entries locally under the RuneLite configuration directory in `fortis-profit-tracker/ledger.json`. The entries include your in-game character name, timestamps, run outcomes, wave numbers, notes, and GP amounts. CSV export writes to the destination you select. This version does not implement upload to an external server.
 
-Back up `ledger.json` before upgrading or making manual changes. Do not publicly commit your personal ledger or exported CSV files.
+Back up `ledger.json` before upgrading, overwriting it, or using **Reload Ledger**. Reload replaces the loaded history rather than merging records. Do not publicly commit your personal ledger or exported CSV files.
 
 ## Development
 
