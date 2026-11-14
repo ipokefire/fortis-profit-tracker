@@ -6,9 +6,7 @@ import java.awt.Component;
 import java.awt.Color;
 import java.awt.FlowLayout;
 import java.awt.GridLayout;
-import java.net.URL;
-import java.io.IOException;
-import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
 import java.awt.event.MouseEvent;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -164,16 +162,8 @@ final class FortisProfitPanel extends PluginPanel
     /** A bundled pixel-art copy of the GE hand-and-coin icon supplied for the UI. */
     private static Icon loadGrandExchangeIcon()
     {
-        URL resource = FortisProfitPanel.class.getResource("/com/fortisprofit/grand_exchange.png");
-        if (resource == null) return null;
-        try
-        {
-            return new ImageIcon(ImageUtil.resizeImage(ImageIO.read(resource), 18, 18));
-        }
-        catch (IOException e)
-        {
-            return null;
-        }
+        BufferedImage image = ImageUtil.loadImageResource(FortisProfitPanel.class, "/com/fortisprofit/grand_exchange.png");
+        return new ImageIcon(ImageUtil.resizeImage(image, 18, 18));
     }
 
     /** Keep the three attempt counters in distinct, spaced icon/count pairs. */

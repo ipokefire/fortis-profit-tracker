@@ -1,6 +1,6 @@
 # Colosseum Profit Tracker
 
-## v1.5.2.1 — Reload Ledger and compile fix
+## v1.5.2.1 — Reload Ledger, compliance, and compile fixes
 
 - Replaced the redundant **Refresh** buttons in History and All-Time with **Reload Ledger**.
 - Reload Ledger reads the current `ledger.json` from disk without restarting RuneLite, making it easier to load a replacement ledger copied from another computer.
@@ -9,6 +9,7 @@
 - Confirms the number of entries loaded after a successful reload.
 - Preserves the established ledger schema and compatibility handling for older quiver-turn-in records. Reloading **replaces** the in-memory history; it does not merge two histories.
 - Fixed four incorrect references in the ledger's legacy-entry consolidation helper that prevented v1.5.2 from compiling.
+- Updated the bundled Grand Exchange icon loader to use RuneLite's `ImageUtil.loadImageResource()` as requested by Plugin Hub review.
 
 ## v1.5.1 — UI refresh optimizations
 

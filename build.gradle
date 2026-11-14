@@ -17,7 +17,7 @@ dependencies {
 }
 
 group = 'com.fortisprofit'
-version = '1.5.2'
+version = '1.5.2.1'
 
 java {
     sourceCompatibility = JavaVersion.VERSION_11
