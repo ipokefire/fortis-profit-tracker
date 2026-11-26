@@ -24,6 +24,8 @@ import javax.swing.BorderFactory;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
+import javax.swing.Box;
+import javax.swing.BoxLayout;
 import javax.swing.JSplitPane;
 import javax.swing.JTabbedPane;
 import javax.swing.JTable;
@@ -137,6 +139,7 @@ final class FortisProfitPanel extends PluginPanel
         tabs.addTab("History", scrollableTab(makeHistory()));
         tabs.addTab("All-Time", scrollableTab(makeAllTime()));
         tabs.addTab("Current Run", scrollableTab(makeCurrentRun()));
+        tabs.addTab("Pillar Stack", scrollableTab(makePillarStack()));
         tabs.addChangeListener(e -> refresh());
         add(tabs, BorderLayout.CENTER);
         // Date rollover and login/account changes must update the display even without a ledger event.
@@ -158,6 +161,55 @@ final class FortisProfitPanel extends PluginPanel
         return pane;
     }
 
+
+    /** Reference diagrams bundled with the plugin (loaded through RuneLite ImageUtil). */
+    private JPanel makePillarStack()
+    {
+        JPanel content = new JPanel();
+        content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
+        content.setBorder(BorderFactory.createEmptyBorder(6, 4, 10, 4));
+        content.add(pillarDiagram("Pillar stacks", "/com/fortisprofit/pillar_stacks.png"));
+        content.add(Box.createVerticalStrut(12));
+        content.add(pillarDiagram("Alternative stacks and shamans", "/com/fortisprofit/pillar_variants.png"));
+        return content;
+    }
+
+    private JPanel pillarDiagram(String title, String resource)
+    {
+        JPanel section = new JPanel();
+        section.setLayout(new BoxLayout(section, BoxLayout.Y_AXIS));
+        section.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        JLabel heading = new JLabel(title);
+        heading.setAlignmentX(Component.LEFT_ALIGNMENT);
+        section.add(heading);
+        section.add(Box.createVerticalStrut(4));
+
+        BufferedImage full = ImageUtil.loadImageResource(FortisProfitPanel.class, resource);
+        if (full == null)
+        {
+            section.add(new JLabel("Diagram unavailable"));
+            return section;
+        }
+
+        // Fit the narrow RuneLite sidebar while preserving the image's aspect ratio.
+        int width = Math.min(220, full.getWidth());
+        int height = (int) Math.round((double) full.getHeight() * width / full.getWidth());
+        JLabel preview = new JLabel(new ImageIcon(ImageUtil.resizeImage(full, width, height)));
+        preview.setAlignmentX(Component.LEFT_ALIGNMENT);
+        section.add(preview);
+
+        JButton fullSize = new JButton("View full size");
+        fullSize.setAlignmentX(Component.LEFT_ALIGNMENT);
+        fullSize.addActionListener(e -> {
+            JScrollPane imageScroll = new JScrollPane(new JLabel(new ImageIcon(full)));
+            imageScroll.setPreferredSize(new Dimension(Math.min(650, full.getWidth() + 30),
+                Math.min(700, full.getHeight() + 30)));
+            JOptionPane.showMessageDialog(this, imageScroll, title, JOptionPane.PLAIN_MESSAGE);
+        });
+        section.add(fullSize);
+        return section;
+    }
 
     /** A bundled pixel-art copy of the GE hand-and-coin icon supplied for the UI. */
     private static Icon loadGrandExchangeIcon()

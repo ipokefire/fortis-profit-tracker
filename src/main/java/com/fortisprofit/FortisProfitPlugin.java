@@ -8,8 +8,6 @@ import java.awt.Font;
 import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
 import java.util.Locale;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.logging.Logger;
 import javax.inject.Inject;
 import javax.swing.SwingUtilities;
@@ -54,10 +52,6 @@ import net.runelite.client.util.Text;
 public class FortisProfitPlugin extends Plugin
 {
     private static final Logger DIAGNOSTICS = Logger.getLogger(FortisProfitPlugin.class.getName());
-    // Observed OSRS chat: "Payment has been taken from your bank: 10,000 x Coins"
-    private static final Pattern RECOVERY_PAYMENT = Pattern.compile(
-        "\\bpayment has been taken from your bank:\\s*([0-9][0-9,]*)\\s*x\\s*coins\\b",
-        Pattern.CASE_INSENSITIVE);
     private static final long RECOVERY_WINDOW_MS = 30 * 60_000L;
     @Inject private Client client;
     @Inject private ClientToolbar toolbar;
@@ -593,30 +587,22 @@ public class FortisProfitPlugin extends Plugin
         checkAccount();
         // Bank deduction can occur after exiting the arena; the death event
         // remains pending until its actual recovery payment is observed.
-        Matcher recoveryPayment = RECOVERY_PAYMENT.matcher(message);
-        if (recoveryPayment.find())
+        long gpPaid = RecoveryPaymentParser.parseGp(message);
+        if (gpPaid > 0)
         {
-            try
+            long now = System.currentTimeMillis();
+            String fingerprint = message + "|" + account();
+            if (!(fingerprint.equals(lastRecoveryPaymentFingerprint)
+                && now - lastRecoveryPaymentMs < 5_000))
             {
-                long gpPaid = Long.parseLong(recoveryPayment.group(1).replace(",", ""));
-                long now = System.currentTimeMillis();
-                String fingerprint = message + "|" + account();
-                if (gpPaid > 0 && !(fingerprint.equals(lastRecoveryPaymentFingerprint)
-                    && now - lastRecoveryPaymentMs < 5_000))
+                boolean applied = ledger.applyRecoveryFee(account(), gpPaid, RECOVERY_WINDOW_MS);
+                DIAGNOSTICS.info("Fortis grave payment: gp=" + gpPaid + " matchedDeath=" + applied);
+                if (applied)
                 {
-                    boolean applied = ledger.applyRecoveryFee(account(), gpPaid, RECOVERY_WINDOW_MS);
-                    DIAGNOSTICS.info("Fortis grave payment: gp=" + gpPaid + " matchedDeath=" + applied);
-                    if (applied)
-                    {
-                        lastRecoveryPaymentFingerprint = fingerprint;
-                        lastRecoveryPaymentMs = now;
-                        refresh();
-                    }
+                    lastRecoveryPaymentFingerprint = fingerprint;
+                    lastRecoveryPaymentMs = now;
+                    refresh();
                 }
-            }
-            catch (NumberFormatException ex)
-            {
-                DIAGNOSTICS.warning("Invalid gravestone payment amount: " + recoveryPayment.group(1));
             }
             return;
         }

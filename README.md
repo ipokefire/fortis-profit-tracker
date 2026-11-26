@@ -1,3 +1,18 @@
+## v1.5.4 — Death's Coffer recovery fees
+
+- Recognizes the observed gravestone chat message `Death charges you 10,000 x Coins. You have ... x Coins left in Death's Coffer.`
+- Records the charged amount (10,000 GP in that example), not the remaining Death's Coffer balance.
+- Uses the same Death / recovery expense and existing death ledger entry as bank-funded gravestone fees; no additional fee category or JSON format change.
+- Preserves the existing 30-minute matching window and duplicate-message protection.
+- Added tests for coffer-funded and bank-funded messages and non-payment text.
+
+## v1.5.3 — Pillar Stack reference tab
+
+- Added a final **Pillar Stack** tab containing the two supplied Colosseum pillar-positioning reference diagrams.
+- Images scroll vertically in the sidebar and can be opened at their original resolution using **View full size**.
+- Images are bundled as resources and loaded through RuneLite `ImageUtil.loadImageResource()` to comply with the Plugin Hub image-loading requirement.
+- No changes to Colosseum detection, supply expenses, ledger format, or historical data.
+
 # Colosseum Profit Tracker
 
 ## v1.5.2.1 — Reload Ledger, compliance, and compile fixes
@@ -53,7 +68,7 @@ Colosseum Profit Tracker is a third-party RuneLite plugin for Old School RuneSca
 
 - Tracks Colosseum completions and early cash-outs.
 - Detects wave changes from game messages and attributes deaths to waves.
-- Records Colosseum death events and can apply an observed bank-funded gravestone recovery payment to the original death entry.
+- Records Colosseum death events and can apply an observed bank-funded or Death's Coffer gravestone recovery payment to the original death entry.
 - Displays daily GP profit/loss with K/M formatting.
 - Provides Today, History, and All-Time tabs with scrolling. The All-Time tab aggregates every recorded date for the active in-game account, including total GP, clears, cash-outs, and deaths.
 - Saves history to a local JSON ledger, supports CSV export, and can reload a replaced `ledger.json` from disk using **Reload Ledger** (History or All-Time).
@@ -61,8 +76,8 @@ Colosseum Profit Tracker is a third-party RuneLite plugin for Old School RuneSca
 
 ## Important limitations
 
-- Recovery fee detection currently relies on a particular game chat message: `Payment has been taken from your bank: 10,000 x Coins` (the amount varies). This is **not** proof that a particular payment is a grave fee. The plugin assigns a matching payment to the most recent unpaid Colosseum death for that character within 30 minutes. Review the ledger if you make an unrelated bank payment within that window.
-- Payments through Death's Coffer, delayed recovery, and some other reclamation paths may not be detected. A free reclamation can remain at 0 GP. Review all P&L figures rather than treating them as authoritative.
+- Recovery fee detection recognizes `Payment has been taken from your bank: 10,000 x Coins` and `Death charges you 10,000 x Coins` (the amount varies). This is **not** proof that a particular payment is a grave fee. The plugin assigns a matching payment to the most recent unpaid Colosseum death for that character within 30 minutes. Review the ledger if you make an unrelated bank payment within that window.
+- Unrecognized or delayed reclamation paths may not be detected. A free reclamation can remain at 0 GP. In unusual split-payment cases, review the recorded fee manually. Review P&L figures rather than treating them as authoritative.
 - Detection depends on RuneLite and OSRS game events/messages, which may change. Some outcomes may require manual correction.
 
 ## Data and privacy

@@ -147,7 +147,7 @@ final class LedgerStore
         return false;
     }
 
-    /** Apply an actual gravestone bank payment to the latest unpaid death.
+    /** Apply an observed bank or Death's Coffer gravestone payment to the latest unpaid death.
      * Reject stale/ambiguous payments rather than changing unrelated P&L.
      * Older v1.1 DEATH rows are eligible as long as they're still at zero.
      */
